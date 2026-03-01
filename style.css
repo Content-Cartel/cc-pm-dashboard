@@ -1,4 +1,4 @@
-/* ── RESET & BASE ───────────────────────────────────────────────── */
+/* â”€â”€ RESET & BASE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
@@ -13,6 +13,10 @@
   --gold:      #D4A843;
   --gold-dim:  #9B7A2F;
   --green:     #22C55E;
+  --blue:      #3B82F6;
+  --amber:     #F59E0B;
+  --purple:    #A855F7;
+  --red:       #EF4444;
   --font:      'Inter', system-ui, -apple-system, sans-serif;
   --radius:    8px;
   --radius-sm: 4px;
@@ -32,7 +36,7 @@ body {
 a { color: inherit; text-decoration: none; }
 button { cursor: pointer; font-family: var(--font); }
 
-/* ── TOP BAR ────────────────────────────────────────────────────── */
+/* â”€â”€ TOP BAR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 #topbar {
   display: flex;
   align-items: center;
@@ -64,7 +68,7 @@ button { cursor: pointer; font-family: var(--font); }
 }
 .stat-pill:hover { border-color: var(--border2); }
 
-/* ── BACK NAV ───────────────────────────────────────────────────── */
+/* â”€â”€ BACK NAV â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 #mainnav {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
@@ -85,7 +89,7 @@ button { cursor: pointer; font-family: var(--font); }
 .back-link:hover { color: var(--text); }
 .back-link.visible { display: block; }
 
-/* ── MAIN CONTENT ───────────────────────────────────────────────── */
+/* â”€â”€ MAIN CONTENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 #appRoot {
   padding: 20px;
   max-width: 1600px;
@@ -97,7 +101,7 @@ button { cursor: pointer; font-family: var(--font); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ── PIPELINE BOARD ─────────────────────────────────────────────── */
+/* â”€â”€ PIPELINE BOARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .pipeline-board {
   display: grid;
   grid-template-columns: 220px 1fr 1fr;
@@ -135,7 +139,7 @@ button { cursor: pointer; font-family: var(--font); }
 }
 .col-body { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
 
-/* ── CLIENT CARD ────────────────────────────────────────────────── */
+/* â”€â”€ CLIENT CARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .client-card {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -181,7 +185,21 @@ button { cursor: pointer; font-family: var(--font); }
 
 .empty-state { text-align: center; padding: 40px 20px; color: var(--text-3); font-size: 13px; }
 
-/* ── CLIENT DETAIL ──────────────────────────────────────────────── */
+/* â”€â”€ PRODUCTION CARD COUNTERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.card-deliverables {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 4px; margin-bottom: 2px;
+}
+.card-active-count {
+  font-size: 11px; font-weight: 600; color: var(--text-2);
+}
+.volume-counter {
+  font-size: 11px; font-weight: 600; color: var(--text-3);
+}
+.volume-counter.on-track { color: var(--green); }
+.volume-counter.behind { color: var(--amber); }
+
+/* â”€â”€ CLIENT DETAIL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .detail-header {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 28px; padding-bottom: 20px;
@@ -205,6 +223,7 @@ button { cursor: pointer; font-family: var(--font); }
   text-transform: uppercase; color: var(--text-3);
   margin-bottom: 12px; padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
 }
 
 /* Team rows */
@@ -255,7 +274,7 @@ button { cursor: pointer; font-family: var(--font); }
 .checklist-item.done .checklist-label { color: var(--text-3); text-decoration: line-through; }
 .checklist-count { margin-left: 8px; font-size: 11px; color: var(--gold); font-weight: 600; }
 
-/* ── PHASE STEPPER ──────────────────────────────────────────────── */
+/* â”€â”€ PHASE STEPPER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .phase-stepper { display: flex; align-items: center; gap: 8px; padding: 16px 0; margin-bottom: 8px; }
 
 .phase-step {
@@ -285,7 +304,7 @@ button { cursor: pointer; font-family: var(--font); }
 .phase-step-desc { font-size: 11px; color: var(--text-3); white-space: nowrap; }
 .phase-step-arrow { color: var(--text-3); font-size: 16px; flex-shrink: 0; }
 
-/* ── ADD CLIENT ─────────────────────────────────────────────────── */
+/* â”€â”€ ADD CLIENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .add-client-bar { display: flex; justify-content: center; padding: 16px 0 4px; }
 
 .add-client-btn {
@@ -321,19 +340,195 @@ button { cursor: pointer; font-family: var(--font); }
 }
 .btn-cancel:hover { border-color: var(--border2); color: var(--text-2); }
 
-/* ── SCROLLBAR ──────────────────────────────────────────────────── */
+/* â”€â”€ ACTION LINKS BAR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.action-links {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 20px;
+}
+.action-link-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text-2);
+  font-size: 12px; font-weight: 600; padding: 8px 14px;
+  font-family: var(--font); transition: all var(--transition);
+  cursor: pointer; text-decoration: none;
+}
+.action-link-btn:hover { border-color: var(--gold-dim); color: var(--gold); background: var(--surface2); }
+
+/* â”€â”€ STATUS BADGES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.status-badge {
+  display: inline-flex; align-items: center; padding: 3px 10px;
+  border-radius: 999px; font-size: 11px; font-weight: 700;
+  cursor: pointer; transition: opacity var(--transition);
+  user-select: none; position: relative;
+}
+.status-badge:hover { opacity: 0.8; }
+.status-badge[data-status="script"]  { background: rgba(161,161,170,0.15); color: #A1A1AA; }
+.status-badge[data-status="filming"] { background: rgba(212,168,67,0.15);  color: var(--gold); }
+.status-badge[data-status="editing"] { background: rgba(59,130,246,0.15);  color: var(--blue); }
+.status-badge[data-status="review"]  { background: rgba(245,158,11,0.15);  color: var(--amber); }
+.status-badge[data-status="done"]    { background: rgba(34,197,94,0.15);   color: var(--green); }
+
+/* â”€â”€ STATUS DROPDOWN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.status-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0;
+  background: var(--surface); border: 1px solid var(--border2);
+  border-radius: var(--radius); padding: 4px;
+  min-width: 140px; z-index: 200;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+.status-dropdown-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-radius: var(--radius-sm);
+  font-size: 12px; font-weight: 600; color: var(--text-2);
+  cursor: pointer; transition: background var(--transition);
+}
+.status-dropdown-item:hover { background: var(--surface2); }
+.status-dropdown-item.current { color: var(--gold); }
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+
+/* â”€â”€ DELIVERABLE ROWS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.deliverable-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 0; border-bottom: 1px solid var(--border);
+}
+.deliverable-row:last-child { border-bottom: none; }
+.deliverable-title {
+  flex: 1; font-size: 13px; font-weight: 600; color: var(--text);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.deliverable-time {
+  font-size: 11px; color: var(--text-3); white-space: nowrap; flex-shrink: 0;
+}
+.deliverable-delete {
+  background: none; border: none; color: var(--text-3);
+  font-size: 15px; width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all var(--transition); flex-shrink: 0;
+}
+.deliverable-delete:hover { background: rgba(239,68,68,0.15); color: var(--red); }
+
+/* â”€â”€ DIRECTOR-LED FLAG â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.director-flag {
+  display: inline-flex; align-items: center; padding: 2px 8px;
+  border-radius: 999px; font-size: 10px; font-weight: 700;
+  background: rgba(168,85,247,0.12); color: var(--purple);
+  border: 1px solid rgba(168,85,247,0.25);
+  flex-shrink: 0;
+}
+
+/* â”€â”€ ADD DELIVERABLE FORM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.add-deliverable-bar {
+  padding-top: 10px;
+}
+.add-deliverable-btn {
+  background: none; border: 1px dashed var(--border2);
+  border-radius: var(--radius); color: var(--text-3);
+  font-size: 12px; font-weight: 600; padding: 8px 16px;
+  transition: all var(--transition); font-family: var(--font);
+  cursor: pointer;
+}
+.add-deliverable-btn:hover { border-color: var(--gold-dim); color: var(--gold); }
+
+.add-deliverable-form {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.add-deliverable-input {
+  flex: 1; min-width: 180px;
+  background: var(--surface); border: 1px solid var(--border2);
+  border-radius: var(--radius); padding: 8px 12px; font-size: 13px;
+  font-weight: 600; color: var(--text); font-family: var(--font);
+  transition: border-color var(--transition);
+}
+.add-deliverable-input:focus { outline: none; border-color: var(--gold); }
+.add-deliverable-input::placeholder { color: var(--text-3); font-weight: 400; }
+
+.director-check-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-2); cursor: pointer;
+  white-space: nowrap;
+}
+.director-check-label input[type="checkbox"] {
+  accent-color: var(--purple); width: 14px; height: 14px; cursor: pointer;
+}
+
+/* â”€â”€ SETTINGS FORM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.settings-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 0;
+}
+.settings-label {
+  font-size: 12px; font-weight: 600; color: var(--text-2);
+  min-width: 120px; flex-shrink: 0;
+}
+.settings-input {
+  flex: 1; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px 12px; font-size: 13px;
+  color: var(--text); font-family: var(--font);
+  transition: border-color var(--transition);
+}
+.settings-input:focus { outline: none; border-color: var(--gold-dim); }
+.settings-input::placeholder { color: var(--text-3); }
+
+.btn-save {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text-2);
+  font-size: 12px; font-weight: 600; padding: 8px 16px;
+  font-family: var(--font); transition: all var(--transition);
+  cursor: pointer; margin-top: 8px;
+}
+.btn-save:hover { border-color: var(--gold-dim); color: var(--gold); }
+.btn-save.saved { border-color: var(--green); color: var(--green); }
+
+/* â”€â”€ ACTIVITY FEED â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.activity-item {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 5px 0;
+}
+.activity-detail {
+  font-size: 12px; color: var(--text-2); flex: 1;
+  line-height: 1.4;
+}
+.activity-time {
+  font-size: 11px; color: var(--text-3); white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* â”€â”€ SECTION ADD BUTTON â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.section-add-btn {
+  background: none; border: none; color: var(--gold);
+  font-size: 11px; font-weight: 700; cursor: pointer;
+  padding: 2px 6px; border-radius: var(--radius-sm);
+  transition: background var(--transition);
+  margin-left: auto;
+}
+.section-add-btn:hover { background: rgba(212,168,67,0.1); }
+
+/* â”€â”€ SECTION COUNT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.section-count {
+  font-size: 11px; color: var(--text-3); font-weight: 600;
+}
+
+/* â”€â”€ SCROLLBAR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 
-/* ── RESPONSIVE ─────────────────────────────────────────────────── */
+/* â”€â”€ RESPONSIVE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @media (max-width: 900px) {
   .pipeline-board { grid-template-columns: 1fr; }
   .phase-stepper { flex-wrap: wrap; }
   .phase-step-arrow { display: none; }
+  .settings-row { flex-direction: column; align-items: flex-start; }
+  .settings-label { min-width: unset; }
 }
 @media (max-width: 600px) {
   #appRoot { padding: 12px; }
   .topbar-center { gap: 4px; }
   .stat-pill { padding: 3px 8px; font-size: 11px; }
+  .deliverable-row { flex-wrap: wrap; gap: 6px; }
+  .add-deliverable-form { flex-direction: column; }
+  .add-deliverable-input { min-width: unset; width: 100%; }
 }
