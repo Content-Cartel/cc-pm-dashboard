@@ -517,6 +517,22 @@ button { cursor: pointer; font-family: var(--font); }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 
 /* ── RESPONSIVE ─────────────────────────────────────────────────── */
+/* Settings group labels */
+.settings-group-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin: 16px 0 6px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+.settings-group-label:first-of-type { margin-top: 4px; border-top: none; }
+
+/* Action links — wrap nicely */
+.action-links { flex-wrap: wrap; }
+
 @media (max-width: 900px) {
   .pipeline-board { grid-template-columns: 1fr; }
   .phase-stepper { flex-wrap: wrap; }
