@@ -14,6 +14,7 @@ const DELIVERABLE_STATUSES = ['script', 'filming', 'editing', 'review', 'done'];
 const STATUS_LABELS = { script: 'Script', filming: 'Filming', editing: 'Editing', review: 'Review', done: 'Done' };
 const STATUS_COLORS = { script: '#A1A1AA', filming: '#D4A843', editing: '#3B82F6', review: '#F59E0B', done: '#22C55E' };
 const N8N_WEBHOOK_URL = 'https://content-cartel-1.app.n8n.cloud/webhook/pm-deliverable';
+const N8N_PHASE_WEBHOOK_URL = 'https://content-cartel-1.app.n8n.cloud/webhook/pm-phase-change';
 const ANALYTICS_BASE = 'https://analytics.contentcartel.net/#/client/';
 
 /* ── GLOBAL STATE ────────────────────────────────────────────────── */
@@ -82,6 +83,10 @@ async function updatePhase(clientId, newPhase) {
   const oldPhase = cl ? cl.phase : '?';
   await sb.from('clients').update({ phase: newPhase }).eq('id', clientId);
   if (cl) logActivity(clientId, 'phase_changed', `"${cl.name}" moved from ${oldPhase} to ${newPhase}`);
+  fireWebhookTo(N8N_PHASE_WEBHOOK_URL, 'phase_changed', {
+    client_name: cl ? cl.name : '', client_id: clientId,
+    old_phase: oldPhase, new_phase: newPhase,
+  });
 }
 
 async function addTeamMemberDB(clientId, memberId) {
@@ -204,7 +209,7 @@ async function logActivity(clientId, action, detail, actor, meta) {
   if (data) ACTIVITY_LOG.unshift(data);
 }
 
-/* ── WEBHOOK ─────────────────────────────────────────────────────── */
+/* ── WEBHOOKS ────────────────────────────────────────────────────── */
 async function fireWebhook(eventType, payload) {
   try {
     await fetch(N8N_WEBHOOK_URL, {
@@ -215,6 +220,16 @@ async function fireWebhook(eventType, payload) {
   } catch (e) {
     // fire-and-forget: never block UI
   }
+}
+
+async function fireWebhookTo(url, eventType, payload) {
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: eventType, timestamp: new Date().toISOString(), ...payload }),
+    });
+  } catch (e) {}
 }
 
 /* ── HELPERS ────────────────────────────────────────────────────── */
@@ -473,14 +488,26 @@ function renderClientDetail(root, clientId) {
       }).join("")}
     </div>`;
 
-  // Action links
+  // Action links — build from all configured URLs
   const sett = client.settings || {};
   const hasAnalytics = sett.metricool_id && sett.metricool_id.trim();
-  const hasDrive = sett.gdrive_url && sett.gdrive_url.trim();
-  const actionLinksHTML = (hasAnalytics || hasDrive) ? `
+  const clientLinks = [
+    { url: sett.gdrive_url,            label: '📁 Google Drive' },
+    { url: sett.sf_scripts_url,        label: '📝 SF Scripts' },
+    { url: sett.lf_scripts_url,        label: '📝 LF Scripts' },
+    { url: sett.main_links_url,        label: '📎 Main Links' },
+    { url: sett.kpis_url,              label: '📈 KPIs' },
+    { url: sett.growth_ops_url,        label: '🚀 Growth Ops' },
+    { url: sett.written_content_url,   label: '✏️ Written Content' },
+    { url: sett.ai_url,                label: '🤖 AI' },
+    { url: sett.social_dashboard_url,  label: '📱 Social Dashboard' },
+  ].filter(l => l.url && l.url.trim());
+
+  const hasAnyLinks = hasAnalytics || clientLinks.length > 0;
+  const actionLinksHTML = hasAnyLinks ? `
     <div class="action-links">
-      ${hasAnalytics ? `<a class="action-link-btn" href="${ANALYTICS_BASE}${sett.metricool_id.trim()}" target="_blank" rel="noopener">📊 View Analytics ↗</a>` : ''}
-      ${hasDrive ? `<a class="action-link-btn" href="${sett.gdrive_url.trim()}" target="_blank" rel="noopener">📁 Google Drive ↗</a>` : ''}
+      ${hasAnalytics ? `<a class="action-link-btn" href="${ANALYTICS_BASE}${sett.metricool_id.trim()}" target="_blank" rel="noopener">📊 Analytics ↗</a>` : ''}
+      ${clientLinks.map(l => `<a class="action-link-btn" href="${l.url.trim()}" target="_blank" rel="noopener">${l.label} ↗</a>`).join('')}
     </div>` : '';
 
   // Team section
@@ -545,14 +572,12 @@ function renderClientDetail(root, clientId) {
       </div>
     </div>`;
 
-  // Settings section
+  // Settings section — core settings + Slack + all client links
   const settingsSection = `
     <div class="detail-section">
       <div class="detail-section-title">Settings</div>
-      <div class="settings-row">
-        <span class="settings-label">Google Drive URL</span>
-        <input class="settings-input" id="settGdrive" type="url" placeholder="https://drive.google.com/..." value="${escHTML(sett.gdrive_url || '')}" />
-      </div>
+
+      <div class="settings-group-label">Core</div>
       <div class="settings-row">
         <span class="settings-label">Videos / week</span>
         <input class="settings-input" id="settVpw" type="number" min="0" placeholder="0" value="${sett.videos_per_week || 0}" style="max-width:100px" />
@@ -561,6 +586,53 @@ function renderClientDetail(root, clientId) {
         <span class="settings-label">Metricool ID</span>
         <input class="settings-input" id="settMetricool" type="text" placeholder="brand-id" value="${escHTML(sett.metricool_id || '')}" />
       </div>
+      <div class="settings-row">
+        <span class="settings-label">Slack Channel</span>
+        <input class="settings-input" id="settSlack" type="text" placeholder="#client-cc-internal" value="${escHTML(sett.slack_channel || '')}" />
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">GHL Location</span>
+        <input class="settings-input" id="settGhlLocationId" type="text" placeholder="GHL location/sub-account ID" value="${escHTML(sett.ghl_location_id || '')}" />
+      </div>
+
+      <div class="settings-group-label">Client Links</div>
+      <div class="settings-row">
+        <span class="settings-label">📁 Google Drive</span>
+        <input class="settings-input" id="settGdrive" type="url" placeholder="https://drive.google.com/..." value="${escHTML(sett.gdrive_url || '')}" />
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">📝 SF Scripts</span>
+        <input class="settings-input" id="settSfScripts" type="url" placeholder="https://docs.google.com/..." value="${escHTML(sett.sf_scripts_url || '')}" />
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">📝 LF Scripts</span>
+        <input class="settings-input" id="settLfScripts" type="url" placeholder="https://docs.google.com/..." value="${escHTML(sett.lf_scripts_url || '')}" />
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">📎 Main Links</span>
+        <input class="settings-input" id="settMainLinks" type="url" placeholder="https://..." value="${escHTML(sett.main_links_url || '')}" />
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">📈 KPIs</span>
+        <input class="settings-input" id="settKpis" type="url" placeholder="https://..." value="${escHTML(sett.kpis_url || '')}" />
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">🚀 Growth Ops</span>
+        <input class="settings-input" id="settGrowthOps" type="url" placeholder="https://..." value="${escHTML(sett.growth_ops_url || '')}" />
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">✏️ Written Content</span>
+        <input class="settings-input" id="settWrittenContent" type="url" placeholder="https://docs.google.com/..." value="${escHTML(sett.written_content_url || '')}" />
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">🤖 AI</span>
+        <input class="settings-input" id="settAi" type="url" placeholder="https://..." value="${escHTML(sett.ai_url || '')}" />
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">📱 Social Dashboard</span>
+        <input class="settings-input" id="settSocialDashboard" type="url" placeholder="https://..." value="${escHTML(sett.social_dashboard_url || '')}" />
+      </div>
+
       <button class="btn-save" id="saveSettingsBtn">Save Settings</button>
     </div>`;
 
@@ -766,13 +838,20 @@ function renderClientDetail(root, clientId) {
   const saveSettingsBtn = root.querySelector("#saveSettingsBtn");
   if (saveSettingsBtn) {
     saveSettingsBtn.addEventListener("click", async () => {
-      const gdrive = root.querySelector("#settGdrive").value.trim();
-      const vpw = parseInt(root.querySelector("#settVpw").value) || 0;
-      const metricool = root.querySelector("#settMetricool").value.trim();
       await saveClientSettings(clientId, {
-        gdrive_url: gdrive,
-        videos_per_week: vpw,
-        metricool_id: metricool,
+        videos_per_week:     parseInt(root.querySelector("#settVpw").value) || 0,
+        metricool_id:        root.querySelector("#settMetricool").value.trim(),
+        slack_channel:       root.querySelector("#settSlack").value.trim(),
+        ghl_location_id:     root.querySelector("#settGhlLocationId").value.trim(),
+        gdrive_url:          root.querySelector("#settGdrive").value.trim(),
+        sf_scripts_url:      root.querySelector("#settSfScripts").value.trim(),
+        lf_scripts_url:      root.querySelector("#settLfScripts").value.trim(),
+        main_links_url:      root.querySelector("#settMainLinks").value.trim(),
+        kpis_url:            root.querySelector("#settKpis").value.trim(),
+        growth_ops_url:      root.querySelector("#settGrowthOps").value.trim(),
+        written_content_url: root.querySelector("#settWrittenContent").value.trim(),
+        ai_url:              root.querySelector("#settAi").value.trim(),
+        social_dashboard_url:root.querySelector("#settSocialDashboard").value.trim(),
       });
       saveSettingsBtn.textContent = "Saved ✓";
       saveSettingsBtn.classList.add("saved");
