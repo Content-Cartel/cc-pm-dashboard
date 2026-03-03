@@ -590,9 +590,22 @@ function renderClientDetail(root, clientId) {
         <span class="settings-label">Slack Channel</span>
         <input class="settings-input" id="settSlack" type="text" placeholder="#client-cc-internal" value="${escHTML(sett.slack_channel || '')}" />
       </div>
+      <div class="settings-group-label">GHL Integration</div>
       <div class="settings-row">
-        <span class="settings-label">GHL Location</span>
+        <span class="settings-label">Location ID</span>
         <input class="settings-input" id="settGhlLocationId" type="text" placeholder="GHL location/sub-account ID" value="${escHTML(sett.ghl_location_id || '')}" />
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">API Token</span>
+        <input class="settings-input" id="settGhlToken" type="password" placeholder="${sett.ghl_location_id ? '••••••• (saved — enter new to replace)' : 'pit-xxxxx (Private Integration token)'}" value="" />
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Status</span>
+        <span id="ghlStatus" style="font-size:13px;color:${sett.ghl_location_id ? 'var(--green,#22c55e)' : 'var(--text-muted)'}">${sett.ghl_location_id ? 'Connected' : 'Not configured'}</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Lead Value ($/lead)</span>
+        <input class="settings-input" id="settLeadValue" type="number" min="0" step="0.01" placeholder="e.g. 10.00" value="${sett.lead_value_dollars || ''}" />
       </div>
 
       <div class="settings-group-label">Client Links</div>
@@ -838,11 +851,16 @@ function renderClientDetail(root, clientId) {
   const saveSettingsBtn = root.querySelector("#saveSettingsBtn");
   if (saveSettingsBtn) {
     saveSettingsBtn.addEventListener("click", async () => {
+      const ghlLocationId = root.querySelector("#settGhlLocationId").value.trim();
+      const ghlToken = root.querySelector("#settGhlToken").value.trim();
+
+      // Save settings to Supabase (token is NOT stored in Supabase)
       await saveClientSettings(clientId, {
         videos_per_week:     parseInt(root.querySelector("#settVpw").value) || 0,
         metricool_id:        root.querySelector("#settMetricool").value.trim(),
         slack_channel:       root.querySelector("#settSlack").value.trim(),
-        ghl_location_id:     root.querySelector("#settGhlLocationId").value.trim(),
+        ghl_location_id:     ghlLocationId,
+        lead_value_dollars:  parseFloat(root.querySelector("#settLeadValue").value) || 0,
         gdrive_url:          root.querySelector("#settGdrive").value.trim(),
         sf_scripts_url:      root.querySelector("#settSfScripts").value.trim(),
         lf_scripts_url:      root.querySelector("#settLfScripts").value.trim(),
@@ -853,6 +871,24 @@ function renderClientDetail(root, clientId) {
         ai_url:              root.querySelector("#settAi").value.trim(),
         social_dashboard_url:root.querySelector("#settSocialDashboard").value.trim(),
       });
+
+      // If GHL token provided, store it on the analytics server
+      if (ghlLocationId && ghlToken) {
+        try {
+          const tokenUrl = `https://analytics.contentcartel.net/api/ghl/set-token?` +
+            `adminKey=cc-secret-12&locationId=${encodeURIComponent(ghlLocationId)}` +
+            `&token=${encodeURIComponent(ghlToken)}`;
+          const res = await fetch(tokenUrl);
+          if (!res.ok) throw new Error(`Token save failed: ${res.status}`);
+          const statusEl = root.querySelector("#ghlStatus");
+          if (statusEl) { statusEl.textContent = "Connected"; statusEl.style.color = "var(--green,#22c55e)"; }
+        } catch (err) {
+          console.error("GHL token save error:", err);
+          const statusEl = root.querySelector("#ghlStatus");
+          if (statusEl) { statusEl.textContent = "Token save failed — check console"; statusEl.style.color = "#ef4444"; }
+        }
+      }
+
       saveSettingsBtn.textContent = "Saved ✓";
       saveSettingsBtn.classList.add("saved");
       setTimeout(() => {
