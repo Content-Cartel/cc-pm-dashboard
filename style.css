@@ -533,6 +533,29 @@ button { cursor: pointer; font-family: var(--font); }
 /* Action links — wrap nicely */
 .action-links { flex-wrap: wrap; }
 
+/* ── WEEKLY CHECKLIST ADDITIONS ─────────────────────────────────── */
+.checklist-owner {
+  font-size: 11px; color: #71717A; margin-left: auto;
+  white-space: nowrap; flex-shrink: 0;
+}
+.checklist-actor {
+  font-size: 11px; font-weight: 600; color: #D4A843;
+  white-space: nowrap; flex-shrink: 0;
+}
+.checklist-time {
+  font-size: 11px; color: #71717A;
+  white-space: nowrap; flex-shrink: 0;
+}
+.checklist-item.done .checklist-owner { opacity: 0.5; }
+.prev-week-badge {
+  font-size: 10px; color: #71717A; font-weight: 600;
+  background: #27272A; border: 1px solid #3F3F46;
+  border-radius: 999px; padding: 2px 8px; margin-left: auto;
+}
+.prev-week-indicator {
+  font-size: 10px; color: #71717A; margin-left: 4px;
+}
+
 @media (max-width: 900px) {
   .pipeline-board { grid-template-columns: 1fr; }
   .phase-stepper { flex-wrap: wrap; }
@@ -544,7 +567,5 @@ button { cursor: pointer; font-family: var(--font); }
   #appRoot { padding: 12px; }
   .topbar-center { gap: 4px; }
   .stat-pill { padding: 3px 8px; font-size: 11px; }
-  .deliverable-row { flex-wrap: wrap; gap: 6px; }
-  .add-deliverable-form { flex-direction: column; }
-  .add-deliverable-input { min-width: unset; width: 100%; }
+  .checklist-owner { display: none; }
 }
