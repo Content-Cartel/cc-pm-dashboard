@@ -1,7 +1,7 @@
 /* ─────────────────────────────────────────────────────────────────
-   CC PM Dashboard v5  ·  app.js
-   Supabase-powered: board, phase stepper, checklist, team,
-   deliverables, activity feed, settings, webhooks
+   CC PM Dashboard v6  ·  app.js
+   Supabase-powered: board, phase stepper, onboarding checklist,
+   weekly production checklist, team, activity feed, settings, webhooks
    ───────────────────────────────────────────────────────────────── */
 
 /* ── SUPABASE CONNECTION ─────────────────────────────────────────── */
@@ -10,10 +10,16 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /* ── CONSTANTS ───────────────────────────────────────────────────── */
-const DELIVERABLE_STATUSES = ['script', 'filming', 'editing', 'review', 'done'];
-const STATUS_LABELS = { script: 'Script', filming: 'Filming', editing: 'Editing', review: 'Review', done: 'Done' };
-const STATUS_COLORS = { script: '#A1A1AA', filming: '#D4A843', editing: '#3B82F6', review: '#F59E0B', done: '#22C55E' };
-const N8N_WEBHOOK_URL = 'https://content-cartel-1.app.n8n.cloud/webhook/pm-deliverable';
+const CHECKLIST_STEPS = [
+  { key: 'scripts_sent',      label: 'Scripts sent',              owner: 'LF Creative' },
+  { key: 'footage_received',  label: 'Footage received',          owner: 'Client / CSM' },
+  { key: 'edit_delivered',    label: 'Edit delivered',             owner: 'LF Editor' },
+  { key: 'qc_approved',      label: 'QC approved',                owner: 'LF Creative' },
+  { key: 'published',        label: 'Published',                   owner: 'Auto / SF Creative' },
+  { key: 'cta_active',       label: 'CTA / Lead Magnet Active',   owner: 'Growth / CSM' },
+];
+
+const N8N_CHECKLIST_WEBHOOK_URL = 'https://content-cartel-1.app.n8n.cloud/webhook/pm-checklist';
 const N8N_PHASE_WEBHOOK_URL = 'https://content-cartel-1.app.n8n.cloud/webhook/pm-phase-change';
 const ANALYTICS_BASE = 'https://analytics.contentcartel.net/#/client/';
 
@@ -24,12 +30,12 @@ let ACTIVITY_LOG = [];
 
 /* ── LOAD DATA FROM SUPABASE ─────────────────────────────────────── */
 async function loadData() {
-  const [teamRes, clientRes, assignRes, checkRes, delivRes, settingsRes, activityRes] = await Promise.all([
+  const [teamRes, clientRes, assignRes, checkRes, weeklyRes, settingsRes, activityRes] = await Promise.all([
     sb.from('team_members').select('*').order('id'),
     sb.from('clients').select('*').order('id'),
     sb.from('client_team').select('*'),
     sb.from('onboarding_checks').select('*').order('id'),
-    sb.from('deliverables').select('*').order('created_at', { ascending: false }),
+    sb.from('weekly_checklist').select('*').order('week_start', { ascending: false }),
     sb.from('client_settings').select('*'),
     sb.from('activity_log').select('*').order('created_at', { ascending: false }).limit(200),
   ]);
@@ -40,8 +46,10 @@ async function loadData() {
 
   ACTIVITY_LOG = activityRes.data || [];
 
-  const allDeliverables = delivRes.data || [];
+  const allWeeklies = weeklyRes.data || [];
   const allSettings = settingsRes.data || [];
+  const thisWeek = getCurrentWeekStart();
+  const lastWeek = getPreviousWeekStart();
 
   CLIENTS = (clientRes.data || []).map(c => {
     const client = {
@@ -49,9 +57,14 @@ async function loadData() {
       name: c.name,
       phase: c.phase,
       team: (assignRes.data || []).filter(a => a.client_id === c.id).map(a => a.team_member_id),
-      deliverables: allDeliverables.filter(d => d.client_id === c.id),
+      weeklyChecklist: null,
+      prevWeekChecklist: null,
       settings: allSettings.find(s => s.client_id === c.id) || null,
     };
+    const clientWeeklies = allWeeklies.filter(w => w.client_id === c.id);
+    client.weeklyChecklist = clientWeeklies.find(w => w.week_start === thisWeek) || null;
+    client.prevWeekChecklist = clientWeeklies.find(w => w.week_start === lastWeek) || null;
+
     const clientChecks = (checkRes.data || []).filter(ch => ch.client_id === c.id);
     if (c.phase === 'onboarding' || clientChecks.length > 0) {
       client.onboardingChecks = clientChecks.map(ch => ({ id: ch.id, label: ch.label, done: ch.done }));
@@ -65,7 +78,7 @@ async function loadData() {
   render();
 }
 
-/* ── SAVE FUNCTIONS (EXISTING) ───────────────────────────────────── */
+/* ── SAVE FUNCTIONS ────────────────────────────────────────────── */
 async function saveNewClient(name) {
   const { data } = await sb.from('clients').insert({ name, phase: 'pipeline' }).select().single();
   if (data) logActivity(data.id, 'client_created', `"${name}" added to pipeline`);
@@ -120,66 +133,68 @@ async function createOnboardingChecks(clientId) {
   return (data || []).map(ch => ({ id: ch.id, label: ch.label, done: ch.done }));
 }
 
-/* ── DELIVERABLE CRUD ────────────────────────────────────────────── */
-async function createDeliverable(clientId, title, directorLed) {
-  const { data } = await sb.from('deliverables').insert({
-    client_id: clientId,
-    title,
-    status: 'script',
-    director_led: directorLed
-  }).select().single();
-
-  if (data) {
-    const cl = getClient(clientId);
-    if (cl) cl.deliverables.unshift(data);
-    logActivity(clientId, 'deliverable_created', `"${title}" created${directorLed ? ' (Director-led)' : ''}`);
-    fireWebhook('deliverable_created', {
-      client_name: cl ? cl.name : '',
-      client_id: clientId,
-      deliverable_title: title,
-      deliverable_id: data.id,
-      director_led: directorLed,
-    });
+/* ── WEEKLY CHECKLIST CRUD ──────────────────────────────────────── */
+async function ensureWeeklyChecklist(clientId) {
+  const weekStart = getCurrentWeekStart();
+  const cl = getClient(clientId);
+  if (cl && cl.weeklyChecklist && cl.weeklyChecklist.week_start === weekStart) {
+    return cl.weeklyChecklist;
   }
-  return data;
+  // Check if it exists in DB
+  const { data: existing } = await sb.from('weekly_checklist')
+    .select('*')
+    .eq('client_id', clientId)
+    .eq('week_start', weekStart)
+    .maybeSingle();
+
+  if (existing) {
+    if (cl) cl.weeklyChecklist = existing;
+    return existing;
+  }
+
+  // Create new row for this week
+  const { data: created } = await sb.from('weekly_checklist')
+    .insert({ client_id: clientId, week_start: weekStart })
+    .select()
+    .single();
+
+  if (cl && created) cl.weeklyChecklist = created;
+  return created;
 }
 
-async function updateDeliverableStatus(id, newStatus, clientId) {
+async function toggleChecklistStep(clientId, stepKey, done, actor) {
+  const checklist = await ensureWeeklyChecklist(clientId);
+  if (!checklist) return;
+
+  const updates = {};
+  updates[stepKey] = done;
+  updates[stepKey + '_at'] = done ? new Date().toISOString() : null;
+  updates[stepKey + '_by'] = done ? (actor || '') : '';
+
+  await sb.from('weekly_checklist').update(updates).eq('id', checklist.id);
+
+  // Update local state
+  Object.assign(checklist, updates);
+
   const cl = getClient(clientId);
-  const deliv = cl ? cl.deliverables.find(d => d.id === id) : null;
-  const oldStatus = deliv ? deliv.status : '?';
+  const stepLabel = CHECKLIST_STEPS.find(s => s.key === stepKey)?.label || stepKey;
+  const detail = actor
+    ? `${actor} ${done ? 'checked' : 'unchecked'} "${stepLabel}" for "${cl?.name || '?'}"`
+    : `"${stepLabel}" ${done ? 'checked' : 'unchecked'} for "${cl?.name || '?'}"`;
 
-  const updates = { status: newStatus, updated_at: new Date().toISOString() };
-  if (newStatus === 'done') updates.done_at = new Date().toISOString();
-  else updates.done_at = null;
+  logActivity(clientId, 'checklist_step_toggled', detail, actor);
 
-  await sb.from('deliverables').update(updates).eq('id', id);
-
-  if (deliv) {
-    deliv.status = newStatus;
-    deliv.updated_at = updates.updated_at;
-    deliv.done_at = updates.done_at;
-  }
-
-  logActivity(clientId, 'deliverable_status_changed',
-    `"${deliv ? deliv.title : '?'}" moved from ${STATUS_LABELS[oldStatus] || oldStatus} to ${STATUS_LABELS[newStatus]}`);
-
-  fireWebhook('deliverable_status_changed', {
-    client_name: cl ? cl.name : '',
+  // Fire webhook for n8n
+  fireWebhookTo(N8N_CHECKLIST_WEBHOOK_URL, 'checklist_step_toggled', {
+    client_name: cl?.name || '',
     client_id: clientId,
-    deliverable_title: deliv ? deliv.title : '',
-    deliverable_id: id,
-    old_status: oldStatus,
-    new_status: newStatus,
+    step: stepKey,
+    step_label: stepLabel,
+    done: done,
+    actor: actor || '',
+    week_start: checklist.week_start,
+    progress: checklistProgress(checklist),
   });
-}
-
-async function deleteDeliverable(id, clientId) {
-  const cl = getClient(clientId);
-  const deliv = cl ? cl.deliverables.find(d => d.id === id) : null;
-  await sb.from('deliverables').delete().eq('id', id);
-  if (cl) cl.deliverables = cl.deliverables.filter(d => d.id !== id);
-  if (deliv) logActivity(clientId, 'deliverable_deleted', `"${deliv.title}" deleted`);
 }
 
 /* ── CLIENT SETTINGS ─────────────────────────────────────────────── */
@@ -210,18 +225,6 @@ async function logActivity(clientId, action, detail, actor, meta) {
 }
 
 /* ── WEBHOOKS ────────────────────────────────────────────────────── */
-async function fireWebhook(eventType, payload) {
-  try {
-    await fetch(N8N_WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event: eventType, timestamp: new Date().toISOString(), ...payload }),
-    });
-  } catch (e) {
-    // fire-and-forget: never block UI
-  }
-}
-
 async function fireWebhookTo(url, eventType, payload) {
   try {
     await fetch(url, {
@@ -229,7 +232,9 @@ async function fireWebhookTo(url, eventType, payload) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ event: eventType, timestamp: new Date().toISOString(), ...payload }),
     });
-  } catch (e) {}
+  } catch (e) {
+    // fire-and-forget: never block UI
+  }
 }
 
 /* ── HELPERS ────────────────────────────────────────────────────── */
@@ -249,26 +254,40 @@ function onboardingProgress(client) {
   return { done, total, pct: Math.round((done / total) * 100) };
 }
 
-function activeDeliverables(client) {
-  return (client.deliverables || []).filter(d => d.status !== 'done');
-}
-
-function doneThisWeek(client) {
+/* ── WEEK HELPERS ─────────────────────────────────────────────── */
+function getCurrentWeekStart() {
   const now = new Date();
-  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  return (client.deliverables || []).filter(d => d.status === 'done' && d.done_at && new Date(d.done_at) >= weekAgo).length;
+  const day = now.getDay(); // 0=Sun, 1=Mon, ...
+  const diff = day === 0 ? 6 : day - 1; // days since Monday
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - diff);
+  monday.setHours(0, 0, 0, 0);
+  return monday.toISOString().split('T')[0]; // "YYYY-MM-DD"
 }
 
-function volumeHTML(client) {
-  const done = doneThisWeek(client);
-  const target = client.settings?.videos_per_week || 0;
-  if (target === 0) return `<span class="volume-counter">${done} done this wk</span>`;
-  const cls = done >= target ? 'on-track' : 'behind';
-  return `<span class="volume-counter ${cls}">${done}/${target} this wk</span>`;
+function getPreviousWeekStart() {
+  const current = new Date(getCurrentWeekStart() + 'T00:00:00');
+  current.setDate(current.getDate() - 7);
+  return current.toISOString().split('T')[0];
 }
 
-function statusBadgeHTML(status) {
-  return `<span class="status-badge" data-status="${status}">${STATUS_LABELS[status] || status}</span>`;
+function checklistProgress(checklist) {
+  if (!checklist) return { done: 0, total: CHECKLIST_STEPS.length };
+  let done = 0;
+  for (const step of CHECKLIST_STEPS) {
+    if (checklist[step.key]) done++;
+  }
+  return { done, total: CHECKLIST_STEPS.length };
+}
+
+function checklistProgressHTML(client) {
+  const prog = checklistProgress(client.weeklyChecklist);
+  if (prog.done === prog.total) {
+    return `<span class="volume-counter on-track">${prog.done}/${prog.total} this wk</span>`;
+  } else if (prog.done > 0) {
+    return `<span class="volume-counter">${prog.done}/${prog.total} this wk</span>`;
+  }
+  return `<span class="volume-counter behind">0/${prog.total} this wk</span>`;
 }
 
 function timeAgo(dateStr) {
@@ -319,11 +338,11 @@ function render() {
   const pillProd = document.getElementById("pillProduction");
   const pillDeliv = document.getElementById("pillDeliverables");
   if (pillClients) pillClients.textContent = `${CLIENTS.length} clients`;
-  const prodCount = CLIENTS.filter(c => c.phase === "production" || c.phase === "special").length;
-  if (pillProd) pillProd.textContent = `${prodCount} in production`;
-  // Total active deliverables across all clients
-  const totalActive = CLIENTS.reduce((sum, c) => sum + activeDeliverables(c).length, 0);
-  if (pillDeliv) pillDeliv.textContent = `${totalActive} active`;
+  const prodClients = CLIENTS.filter(c => c.phase === "production" || c.phase === "special");
+  if (pillProd) pillProd.textContent = `${prodClients.length} in production`;
+  const totalChecked = prodClients.reduce((sum, c) => sum + checklistProgress(c.weeklyChecklist).done, 0);
+  const totalPossible = prodClients.length * CHECKLIST_STEPS.length;
+  if (pillDeliv) pillDeliv.textContent = `${totalChecked}/${totalPossible} steps done`;
 }
 
 window.addEventListener("hashchange", render);
@@ -378,7 +397,7 @@ function renderPipeline(root) {
         if (!name) return;
         const saved = await saveNewClient(name);
         if (saved) {
-          CLIENTS.push({ id: saved.id, name: saved.name, phase: saved.phase, team: [], deliverables: [], settings: null });
+          CLIENTS.push({ id: saved.id, name: saved.name, phase: saved.phase, team: [], weeklyChecklist: null, prevWeekChecklist: null, settings: null });
           render();
         }
       });
@@ -432,7 +451,6 @@ function onboardingCardHTML(c) {
 }
 
 function productionCardHTML(c) {
-  const active = activeDeliverables(c).length;
   const avatarsHTML = c.team && c.team.length
     ? `<div class="card-avatars-group"><span class="card-team-label">Team:</span><div class="card-avatars">${c.team.slice(0,3).map(avatarHTML).join("")}</div></div>`
     : '';
@@ -440,13 +458,19 @@ function productionCardHTML(c) {
     ? `<span class="special-badge">${c.specialLabel}</span>`
     : '';
 
+  const prog = checklistProgress(c.weeklyChecklist);
+  const prevProg = checklistProgress(c.prevWeekChecklist);
+  const prevHTML = c.prevWeekChecklist
+    ? `<span class="prev-week-indicator" title="Last week">${prevProg.done === prevProg.total ? '✅' : prevProg.done + '/' + prevProg.total}</span>`
+    : '';
+
   return `
     <div class="client-card" data-id="${c.id}">
       <div class="card-name">${c.name}</div>
       ${specialHTML}
       <div class="card-deliverables">
-        <span class="card-active-count">${active} active</span>
-        ${volumeHTML(c)}
+        ${checklistProgressHTML(c)}
+        ${prevHTML}
       </div>
       ${avatarsHTML ? `<div class="card-footer">${avatarsHTML}</div>` : ''}
     </div>`;
@@ -532,15 +556,15 @@ function renderClientDetail(root, clientId) {
       </div>
     </div>`;
 
-  // Onboarding checklist
-  const checklistSection = client.onboardingChecks ? `
+  // Onboarding checklist (onboarding phase only)
+  const onboardingChecklistSection = client.onboardingChecks ? `
     <div class="detail-section">
       <div class="detail-section-title">Onboarding Checklist
         ${prog ? `<span class="checklist-count">${prog.done}/${prog.total}</span>` : ''}
       </div>
       <div id="checklist-${client.id}">
         ${client.onboardingChecks.map((item, i) => `
-          <div class="checklist-item ${item.done ? 'done' : ''}" data-client="${client.id}" data-idx="${i}">
+          <div class="checklist-item onboarding-check ${item.done ? 'done' : ''}" data-client="${client.id}" data-idx="${i}">
             <div class="check-box ${item.done ? 'checked' : ''}">
               <span class="check-icon">✓</span>
             </div>
@@ -549,30 +573,40 @@ function renderClientDetail(root, clientId) {
       </div>
     </div>` : '';
 
-  // Deliverables section
-  const delivs = client.deliverables || [];
-  const activeCount = activeDeliverables(client).length;
-  const delivSection = `
+  // Weekly production checklist (production/special phase only)
+  const isProduction = client.phase === 'production' || client.phase === 'special';
+  const wc = client.weeklyChecklist;
+  const wcProg = checklistProgress(wc);
+  const prevWc = client.prevWeekChecklist;
+  const prevWcProg = checklistProgress(prevWc);
+
+  const weeklyChecklistSection = isProduction ? `
     <div class="detail-section">
       <div class="detail-section-title">
-        Deliverables
-        <span class="section-count">${activeCount} active</span>
-        <button class="section-add-btn" id="addDelivBtn">+ Add</button>
+        Weekly Checklist
+        <span class="checklist-count" id="wcCount">${wcProg.done}/${wcProg.total}</span>
+        ${prevWc ? `<span class="prev-week-badge">${prevWcProg.done === prevWcProg.total ? 'Last wk: ✅' : 'Last wk: ' + prevWcProg.done + '/' + prevWcProg.total}</span>` : ''}
       </div>
-      <div id="delivAddArea"></div>
-      <div id="delivList">
-        ${delivs.length === 0 ? '<div class="empty-hint">No deliverables yet</div>' : delivs.map(d => `
-          <div class="deliverable-row" data-deliv-id="${d.id}">
-            <span class="deliverable-title">${escHTML(d.title)}</span>
-            ${d.director_led ? '<span class="director-flag">Director</span>' : ''}
-            <span class="status-badge" data-status="${d.status}" data-deliv-id="${d.id}">${STATUS_LABELS[d.status]}</span>
-            <span class="deliverable-time">${timeAgo(d.updated_at || d.created_at)}</span>
-            <button class="deliverable-delete" data-deliv-id="${d.id}" title="Delete">×</button>
-          </div>`).join("")}
+      <div id="weeklyChecklist-${client.id}">
+        ${CHECKLIST_STEPS.map((step, i) => {
+          const isDone = wc ? wc[step.key] : false;
+          const doneAt = wc ? wc[step.key + '_at'] : null;
+          const doneBy = wc ? wc[step.key + '_by'] : '';
+          return `
+          <div class="checklist-item weekly-check ${isDone ? 'done' : ''}" data-client="${client.id}" data-step="${step.key}" data-idx="${i}">
+            <div class="check-box ${isDone ? 'checked' : ''}">
+              <span class="check-icon">✓</span>
+            </div>
+            <span class="checklist-label">${step.label}</span>
+            <span class="checklist-owner">${step.owner}</span>
+            ${isDone && doneBy ? `<span class="checklist-actor">${escHTML(doneBy)}</span>` : ''}
+            ${isDone && doneAt ? `<span class="checklist-time">${timeAgo(doneAt)}</span>` : ''}
+          </div>`;
+        }).join("")}
       </div>
-    </div>`;
+    </div>` : '';
 
-  // Settings section — core settings + Slack + all client links
+  // Settings section
   const settingsSection = `
     <div class="detail-section">
       <div class="detail-section-title">Settings</div>
@@ -669,8 +703,8 @@ function renderClientDetail(root, clientId) {
     ${actionLinksHTML}
     ${stepperHTML}
     ${teamSection}
-    ${checklistSection}
-    ${delivSection}
+    ${onboardingChecklistSection}
+    ${weeklyChecklistSection}
     ${settingsSection}
     ${activitySection}
   `;
@@ -743,8 +777,8 @@ function renderClientDetail(root, clientId) {
     });
   }
 
-  // Checklist toggle
-  root.querySelectorAll(".checklist-item").forEach(item => {
+  // Onboarding checklist toggle
+  root.querySelectorAll(".onboarding-check").forEach(item => {
     item.addEventListener("click", async () => {
       const idx = parseInt(item.dataset.idx);
       const cid = parseInt(item.dataset.client);
@@ -762,88 +796,30 @@ function renderClientDetail(root, clientId) {
     });
   });
 
-  // ── DELIVERABLES ────────────────────────────────────────────
+  // Weekly production checklist toggle
+  root.querySelectorAll(".weekly-check").forEach(item => {
+    item.addEventListener("click", async () => {
+      const cid = parseInt(item.dataset.client);
+      const stepKey = item.dataset.step;
+      const cl = getClient(cid);
+      if (!cl) return;
 
-  // Add deliverable button
-  const addDelivBtn = root.querySelector("#addDelivBtn");
-  const addArea = root.querySelector("#delivAddArea");
-  if (addDelivBtn && addArea) {
-    addDelivBtn.addEventListener("click", () => {
-      addArea.innerHTML = `
-        <div class="add-deliverable-form">
-          <input type="text" class="add-deliverable-input" id="newDelivTitle" placeholder="Video title..." autofocus />
-          <label class="director-check-label"><input type="checkbox" id="newDelivDirector" /> Director-led</label>
-          <button class="btn-primary" id="confirmAddDeliv">Add</button>
-          <button class="btn-cancel" id="cancelAddDeliv">Cancel</button>
-        </div>`;
-      const inp = addArea.querySelector("#newDelivTitle");
-      inp.focus();
-      inp.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") addArea.querySelector("#confirmAddDeliv").click();
-        if (e.key === "Escape") addArea.querySelector("#cancelAddDeliv").click();
-      });
-      addArea.querySelector("#confirmAddDeliv").addEventListener("click", async () => {
-        const title = inp.value.trim();
-        if (!title) return;
-        const dirLed = addArea.querySelector("#newDelivDirector").checked;
-        await createDeliverable(clientId, title, dirLed);
-        renderClientDetail(root, clientId);
-      });
-      addArea.querySelector("#cancelAddDeliv").addEventListener("click", () => {
-        addArea.innerHTML = '';
-      });
-    });
-  }
+      const wc2 = cl.weeklyChecklist;
+      const currentlyDone = wc2 ? wc2[stepKey] : false;
+      const newDone = !currentlyDone;
 
-  // Status badge clicks → dropdown
-  root.querySelectorAll(".status-badge[data-deliv-id]").forEach(badge => {
-    badge.addEventListener("click", (e) => {
-      e.stopPropagation();
-      // Close any existing dropdown
-      document.querySelectorAll(".status-dropdown").forEach(d => d.remove());
-
-      const delivId = parseInt(badge.dataset.delivId);
-      const currentStatus = badge.dataset.status;
-
-      const dropdown = document.createElement("div");
-      dropdown.className = "status-dropdown";
-      dropdown.innerHTML = DELIVERABLE_STATUSES.map(s => `
-        <div class="status-dropdown-item ${s === currentStatus ? 'current' : ''}" data-status="${s}">
-          <span class="status-dot" style="background:${STATUS_COLORS[s]}"></span>
-          ${STATUS_LABELS[s]}
-        </div>`).join("");
-
-      badge.style.position = 'relative';
-      badge.appendChild(dropdown);
-
-      dropdown.querySelectorAll(".status-dropdown-item").forEach(item => {
-        item.addEventListener("click", async (e2) => {
-          e2.stopPropagation();
-          const newStatus = item.dataset.status;
-          if (newStatus === currentStatus) { dropdown.remove(); return; }
-          await updateDeliverableStatus(delivId, newStatus, clientId);
-          renderClientDetail(root, clientId);
-        });
-      });
-
-      // Close on outside click
-      const closeDropdown = (evt) => {
-        if (!dropdown.contains(evt.target)) {
-          dropdown.remove();
-          document.removeEventListener("click", closeDropdown);
+      // Get actor name (prompted once, saved in localStorage)
+      let actor = '';
+      if (newDone) {
+        actor = localStorage.getItem('cc_pm_actor') || '';
+        if (!actor) {
+          actor = prompt('Your name or initials:') || '';
+          if (actor) localStorage.setItem('cc_pm_actor', actor);
         }
-      };
-      setTimeout(() => document.addEventListener("click", closeDropdown), 0);
-    });
-  });
+      }
 
-  // Delete deliverable
-  root.querySelectorAll(".deliverable-delete").forEach(btn => {
-    btn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const delivId = parseInt(btn.dataset.delivId);
-      await deleteDeliverable(delivId, clientId);
-      renderClientDetail(root, clientId);
+      await toggleChecklistStep(cid, stepKey, newDone, actor);
+      renderClientDetail(root, cid);
     });
   });
 
