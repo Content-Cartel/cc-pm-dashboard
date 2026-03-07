@@ -556,15 +556,74 @@ button { cursor: pointer; font-family: var(--font); }
   font-size: 10px; color: #71717A; margin-left: 4px;
 }
 
-/* Checklist section dividers (Long Form / Shorts) */
-.checklist-divider {
-  font-size: 9px; font-weight: 700; letter-spacing: 0.1em;
-  text-transform: uppercase; color: var(--text-3);
-  padding: 10px 0 4px;
+/* ── COLLAPSIBLE SECTIONS ──────────────────────────────────────── */
+.collapsible-section {
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
 }
-.checklist-divider:first-child { padding-top: 0; }
-.checklist-divider:not(:first-child) {
-  margin-top: 6px; border-top: 1px solid var(--border);
+.collapsible-header {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 12px 14px;
+  background: none; border: none; color: var(--text);
+  cursor: pointer; transition: background var(--transition);
+  text-align: left; font-family: var(--font);
+}
+.collapsible-header:hover { background: var(--surface2); }
+.collapsible-arrow {
+  font-size: 12px; color: var(--text-3);
+  width: 14px; flex-shrink: 0; text-align: center;
+  transition: transform 0.15s ease;
+}
+.collapsible-title {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.collapsible-summary {
+  font-size: 11px; font-weight: 600; color: var(--text-2);
+  margin-left: auto; display: flex; align-items: center; gap: 6px;
+  white-space: nowrap;
+}
+.collapsible-body {
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--border);
+}
+
+/* Nested sub-sections (LF / SF / Written inside Weekly Checklist) */
+.collapsible-sub {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.collapsible-sub:last-child { margin-bottom: 0; }
+.sub-header {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 8px 12px;
+  background: none; border: none; color: var(--text);
+  cursor: pointer; font-family: var(--font);
+  transition: background var(--transition);
+  text-align: left;
+}
+.sub-header:hover { background: rgba(255,255,255,0.03); }
+.sub-arrow {
+  font-size: 10px; color: var(--text-3);
+  width: 12px; flex-shrink: 0; text-align: center;
+}
+.sub-title {
+  font-size: 11px; font-weight: 700; color: var(--text-2);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.sub-count {
+  font-size: 11px; font-weight: 600; color: var(--gold);
+  margin-left: auto;
+}
+.sub-body {
+  padding: 0 12px 8px;
+  border-top: 1px solid var(--border);
 }
 
 /* Week complete badge */
@@ -572,8 +631,72 @@ button { cursor: pointer; font-family: var(--font); }
   font-size: 10px; font-weight: 700;
   color: var(--green); background: rgba(34,197,94,0.12);
   border: 1px solid rgba(34,197,94,0.3);
-  border-radius: 999px; padding: 2px 10px; margin-left: auto;
+  border-radius: 999px; padding: 2px 10px; margin-left: 4px;
 }
+
+/* ── COMPANY LINKS PAGE ───────────────────────────────────────── */
+.company-gate {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 60vh;
+}
+.gate-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 32px;
+  max-width: 360px; width: 100%; text-align: center;
+}
+.gate-title {
+  font-size: 18px; font-weight: 800; color: var(--text);
+  margin-bottom: 8px;
+}
+.gate-desc {
+  font-size: 13px; color: var(--text-3); margin-bottom: 16px;
+}
+.gate-error {
+  font-size: 12px; color: var(--red); margin-top: 10px;
+  font-weight: 600;
+}
+.company-page { max-width: 700px; }
+.company-category { margin-bottom: 20px; }
+.company-cat-title {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text-3);
+  padding-bottom: 8px; margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.company-link-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 0; border-bottom: 1px solid var(--border);
+}
+.company-link-row:last-child { border-bottom: none; }
+.company-link-label {
+  font-size: 13px; font-weight: 600; color: var(--gold);
+  white-space: nowrap; transition: opacity var(--transition);
+}
+.company-link-label:hover { opacity: 0.8; }
+.company-link-url {
+  font-size: 11px; color: var(--text-3);
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
+}
+.company-link-delete {
+  background: none; border: none; color: var(--text-3);
+  font-size: 16px; width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all var(--transition); flex-shrink: 0;
+}
+.company-link-delete:hover { background: rgba(239,68,68,0.15); color: var(--red); }
+.company-add-section {
+  margin-top: 24px; padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* Topbar link */
+.topbar-link {
+  font-size: 12px; font-weight: 600; color: var(--text-2);
+  padding: 6px 12px; border-radius: var(--radius);
+  transition: all var(--transition);
+}
+.topbar-link:hover { color: var(--gold); background: rgba(212,168,67,0.08); }
 
 @media (max-width: 900px) {
   .pipeline-board { grid-template-columns: 1fr; }

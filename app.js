@@ -24,11 +24,17 @@ const N8N_PHASE_WEBHOOK_URL = 'https://content-cartel-1.app.n8n.cloud/webhook/pm
 const N8N_EDIT_DELIVERED_WEBHOOK_URL = 'https://content-cartel-1.app.n8n.cloud/webhook/pm-edit-delivered';
 const ANALYTICS_BASE = 'https://analytics.contentcartel.net/#/client/';
 
-const SHORTS_STEPS = [
-  { key: 'shorts_edited',    label: 'Shorts edited',    owner: 'SF Editor' },
-  { key: 'shorts_published', label: 'Shorts published', owner: 'SF Creative' },
+const SF_STEPS = [
+  { key: 'sf_clips_delivered', label: 'SF clips delivered', owner: 'SF Editor' },
+  { key: 'sf_qc_approved',    label: 'SF QC approved',     owner: 'SF Creative' },
+  { key: 'sf_published',      label: 'SF published',       owner: 'Auto / SF Creative' },
 ];
-const ALL_STEPS = [...CHECKLIST_STEPS, ...SHORTS_STEPS];
+const WRITTEN_STEPS = [
+  { key: 'wc_draft_sent', label: 'Draft sent',     owner: 'Copywriter' },
+  { key: 'wc_approved',   label: 'WC approved',    owner: 'CSM / Client' },
+  { key: 'wc_published',  label: 'WC published',   owner: 'Growth / CSM' },
+];
+const ALL_STEPS = [...CHECKLIST_STEPS, ...SF_STEPS, ...WRITTEN_STEPS];
 
 /* ── GLOBAL STATE ────────────────────────────────────────────────── */
 let TEAM = [];
@@ -204,8 +210,8 @@ async function toggleChecklistStep(clientId, stepKey, done, actor) {
     progress: checklistProgress(checklist, activeSteps),
   });
 
-  // Slack notification when an edit is delivered (LF or Shorts)
-  if ((stepKey === 'edit_delivered' || stepKey === 'shorts_edited') && done) {
+  // Slack notification when an edit is delivered (LF or SF clips)
+  if ((stepKey === 'edit_delivered' || stepKey === 'sf_clips_delivered') && done) {
     fireWebhookTo(N8N_EDIT_DELIVERED_WEBHOOK_URL, 'edit_delivered', {
       client_name: cl?.name || '',
       client_id: clientId,
@@ -316,23 +322,52 @@ function checklistProgress(checklist, steps) {
   return { done, total: steps.length };
 }
 
-function shortsEnabled(client) {
+function sfEnabled(client) {
   return client.settings && client.settings.shorts_per_week > 0;
 }
 
+function writtenEnabled(client) {
+  return client.settings && client.settings.written_per_week > 0;
+}
+
 function getActiveSteps(client) {
-  return shortsEnabled(client) ? ALL_STEPS : CHECKLIST_STEPS;
+  let steps = [...CHECKLIST_STEPS];
+  if (sfEnabled(client)) steps = steps.concat(SF_STEPS);
+  if (writtenEnabled(client)) steps = steps.concat(WRITTEN_STEPS);
+  return steps;
+}
+
+function getActiveStepsByType(client) {
+  const lf = CHECKLIST_STEPS;
+  const sf = sfEnabled(client) ? SF_STEPS : [];
+  const wc = writtenEnabled(client) ? WRITTEN_STEPS : [];
+  return { lf, sf, wc };
 }
 
 function checklistProgressHTML(client) {
   const steps = getActiveSteps(client);
   const prog = checklistProgress(client.weeklyChecklist, steps);
-  if (prog.done === prog.total) {
-    return `<span class="volume-counter on-track">${prog.done}/${prog.total} this wk</span>`;
-  } else if (prog.done > 0) {
-    return `<span class="volume-counter">${prog.done}/${prog.total} this wk</span>`;
+  const lfProg = checklistProgress(client.weeklyChecklist, CHECKLIST_STEPS);
+  const hasSf = sfEnabled(client);
+  const hasWc = writtenEnabled(client);
+
+  let parts = [`${lfProg.done}/${lfProg.total} LF`];
+  if (hasSf) {
+    const sfProg = checklistProgress(client.weeklyChecklist, SF_STEPS);
+    parts.push(`${sfProg.done}/${sfProg.total} SF`);
   }
-  return `<span class="volume-counter behind">0/${prog.total} this wk</span>`;
+  if (hasWc) {
+    const wcProg = checklistProgress(client.weeklyChecklist, WRITTEN_STEPS);
+    parts.push(`${wcProg.done}/${wcProg.total} WC`);
+  }
+
+  const label = parts.join(' · ');
+  if (prog.done === prog.total && prog.total > 0) {
+    return `<span class="volume-counter on-track">${label}</span>`;
+  } else if (prog.done > 0) {
+    return `<span class="volume-counter">${label}</span>`;
+  }
+  return `<span class="volume-counter behind">${label}</span>`;
 }
 
 function timeAgo(dateStr) {
@@ -350,11 +385,16 @@ function timeAgo(dateStr) {
 }
 
 /* ── ROUTER ───────────────────────────────────────────────────── */
+const COMPANY_PASSWORD = 'cc2025';
+
 function getRoute() {
   const hash = location.hash || "#/";
   const path = hash.slice(1) || "/";
   if (path.startsWith("/client/")) {
     return { view: "client", id: parseInt(path.split("/client/")[1]) };
+  }
+  if (path === "/company") {
+    return { view: "company" };
   }
   return { view: "pipeline" };
 }
@@ -370,10 +410,12 @@ function render() {
   root.style.animation = "";
 
   const backLink = document.getElementById("backLink");
-  if (backLink) backLink.classList.toggle("visible", route.view === "client");
+  if (backLink) backLink.classList.toggle("visible", route.view === "client" || route.view === "company");
 
   if (route.view === "client") {
     renderClientDetail(root, route.id);
+  } else if (route.view === "company") {
+    renderCompanyLinks(root);
   } else {
     renderPipeline(root);
   }
@@ -531,7 +573,7 @@ function renderClientDetail(root, clientId) {
 
   const prog = onboardingProgress(client);
 
-  // Phase stepper
+  // Phase stepper (always visible, not collapsible)
   const phases = [
     { key: "pipeline",   label: "Pipeline",      desc: "Closing soon" },
     { key: "onboarding", label: "Onboarding",    desc: "Getting set up" },
@@ -557,7 +599,7 @@ function renderClientDetail(root, clientId) {
       }).join("")}
     </div>`;
 
-  // Action links — build from all configured URLs
+  // ── Action links (collapsible) ──
   const sett = client.settings || {};
   const hasAnalytics = sett.metricool_id && sett.metricool_id.trim();
   const clientLinks = [
@@ -571,63 +613,66 @@ function renderClientDetail(root, clientId) {
     { url: sett.ai_url,                label: '🤖 AI' },
     { url: sett.social_dashboard_url,  label: '📱 Social Dashboard' },
   ].filter(l => l.url && l.url.trim());
+  const allLinkCount = clientLinks.length + (hasAnalytics ? 1 : 0);
+  const hasAnyLinks = allLinkCount > 0;
 
-  const hasAnyLinks = hasAnalytics || clientLinks.length > 0;
-  const actionLinksHTML = hasAnyLinks ? `
+  const actionLinksBody = hasAnyLinks ? `
     <div class="action-links">
       ${hasAnalytics ? `<a class="action-link-btn" href="${ANALYTICS_BASE}${sett.metricool_id.trim()}" target="_blank" rel="noopener">📊 Analytics ↗</a>` : ''}
       ${clientLinks.map(l => `<a class="action-link-btn" href="${l.url.trim()}" target="_blank" rel="noopener">${l.label} ↗</a>`).join('')}
-    </div>` : '';
+    </div>` : '<div class="empty-hint">No links configured</div>';
+  const actionLinksSection = collapsibleSection('links', 'Quick Links', `${allLinkCount} link${allLinkCount !== 1 ? 's' : ''}`, actionLinksBody);
 
-  // Team section
+  // ── Team section (collapsible) ──
   const teamMembers = (client.team || []).map(id => getTeamMember(id)).filter(Boolean);
-  const teamSection = `
-    <div class="detail-section">
-      <div class="detail-section-title">Team</div>
-      ${teamMembers.length ? teamMembers.map(m => `
-        <div class="team-member-row">
-          <span class="avatar" style="width:28px;height:28px;font-size:11px;flex-shrink:0">${m.initials}</span>
-          <span class="team-member-name">${m.name}</span>
-          <span class="team-member-role">${m.role}</span>
-          <button class="remove-member-btn" data-member-id="${m.id}" title="Remove ${m.name}">×</button>
-        </div>`).join("") : '<div class="empty-hint">No team members assigned</div>'}
-      <div style="padding-top:10px">
-        <select class="add-member-select" id="addMemberSelect">
-          <option value="">+ Add team member...</option>
-          ${TEAM.filter(m => !(client.team || []).includes(m.id)).map(m =>
-            `<option value="${m.id}">${m.name} — ${m.role}</option>`
-          ).join("")}
-        </select>
-      </div>
+  const teamAvatarsPreview = teamMembers.slice(0,3).map(m => `<span class="avatar" style="width:18px;height:18px;font-size:8px">${m.initials}</span>`).join('');
+  const teamSummary = teamMembers.length ? `${teamAvatarsPreview} ${teamMembers.length} member${teamMembers.length !== 1 ? 's' : ''}` : 'No members';
+  const teamBody = `
+    ${teamMembers.length ? teamMembers.map(m => `
+      <div class="team-member-row">
+        <span class="avatar" style="width:28px;height:28px;font-size:11px;flex-shrink:0">${m.initials}</span>
+        <span class="team-member-name">${m.name}</span>
+        <span class="team-member-role">${m.role}</span>
+        <button class="remove-member-btn" data-member-id="${m.id}" title="Remove ${m.name}">×</button>
+      </div>`).join("") : '<div class="empty-hint">No team members assigned</div>'}
+    <div style="padding-top:10px">
+      <select class="add-member-select" id="addMemberSelect">
+        <option value="">+ Add team member...</option>
+        ${TEAM.filter(m => !(client.team || []).includes(m.id)).map(m =>
+          `<option value="${m.id}">${m.name} — ${m.role}</option>`
+        ).join("")}
+      </select>
     </div>`;
+  const teamSection = collapsibleSection('team', 'Team', teamSummary, teamBody);
 
-  // Onboarding checklist (onboarding phase only)
-  const onboardingChecklistSection = client.onboardingChecks ? `
-    <div class="detail-section">
-      <div class="detail-section-title">Onboarding Checklist
-        ${prog ? `<span class="checklist-count">${prog.done}/${prog.total}</span>` : ''}
-      </div>
-      <div id="checklist-${client.id}">
-        ${client.onboardingChecks.map((item, i) => `
-          <div class="checklist-item onboarding-check ${item.done ? 'done' : ''}" data-client="${client.id}" data-idx="${i}">
-            <div class="check-box ${item.done ? 'checked' : ''}">
-              <span class="check-icon">✓</span>
-            </div>
-            <span class="checklist-label">${item.label}</span>
-          </div>`).join("")}
-      </div>
-    </div>` : '';
+  // ── Onboarding checklist (collapsible, only if onboarding phase) ──
+  const onboardingChecklistSection = client.onboardingChecks ? collapsibleSection(
+    'onboarding', 'Onboarding Checklist',
+    prog ? `<span class="checklist-count">${prog.done}/${prog.total}</span>` : '',
+    `<div id="checklist-${client.id}">
+      ${client.onboardingChecks.map((item, i) => `
+        <div class="checklist-item onboarding-check ${item.done ? 'done' : ''}" data-client="${client.id}" data-idx="${i}">
+          <div class="check-box ${item.done ? 'checked' : ''}">
+            <span class="check-icon">✓</span>
+          </div>
+          <span class="checklist-label">${item.label}</span>
+        </div>`).join("")}
+    </div>`,
+    { defaultOpen: true }
+  ) : '';
 
-  // Weekly production checklist (production/special phase only)
+  // ── Weekly production checklist (collapsible with nested sub-sections) ──
   const isProduction = client.phase === 'production' || client.phase === 'special';
   const wc = client.weeklyChecklist;
-  const wcProg = checklistProgress(wc);
   const prevWc = client.prevWeekChecklist;
-  const prevWcProg = checklistProgress(prevWc);
 
-  const hasShorts = shortsEnabled(client);
-  const allSteps = getActiveSteps(client);
-  const combinedProg = checklistProgress(wc, allSteps);
+  const hasSf = sfEnabled(client);
+  const hasWc = writtenEnabled(client);
+  const activeSteps = getActiveSteps(client);
+  const combinedProg = checklistProgress(wc, activeSteps);
+  const lfProg = checklistProgress(wc, CHECKLIST_STEPS);
+  const sfProg = checklistProgress(wc, SF_STEPS);
+  const wcProg = checklistProgress(wc, WRITTEN_STEPS);
   const prevCombinedProg = checklistProgress(prevWc, getActiveSteps(client));
 
   function renderStepRows(steps, startIdx) {
@@ -648,130 +693,130 @@ function renderClientDetail(root, clientId) {
     }).join("");
   }
 
-  const weeklyChecklistSection = isProduction ? `
-    <div class="detail-section">
-      <div class="detail-section-title">
-        Weekly Checklist
-        <span class="checklist-count" id="wcCount">${combinedProg.done}/${combinedProg.total}</span>
-        ${prevWc ? `<span class="prev-week-badge">${prevCombinedProg.done === prevCombinedProg.total ? 'Last wk: ✅' : 'Last wk: ' + prevCombinedProg.done + '/' + prevCombinedProg.total}</span>` : ''}
-        ${combinedProg.done === combinedProg.total && combinedProg.total > 0 ? '<span class="week-complete-badge">Week Complete 🎉</span>' : ''}
-      </div>
-      <div id="weeklyChecklist-${client.id}">
-        <div class="checklist-divider">Long Form</div>
-        ${renderStepRows(CHECKLIST_STEPS, 0)}
-        ${hasShorts ? `
-          <div class="checklist-divider">Shorts</div>
-          ${renderStepRows(SHORTS_STEPS, CHECKLIST_STEPS.length)}
-        ` : ''}
-      </div>
-    </div>` : '';
+  // Build summary parts for weekly checklist header
+  let wcSummaryParts = [`${lfProg.done}/${lfProg.total} LF`];
+  if (hasSf) wcSummaryParts.push(`${sfProg.done}/${sfProg.total} SF`);
+  if (hasWc) wcSummaryParts.push(`${wcProg.done}/${wcProg.total} WC`);
+  const wcSummary = wcSummaryParts.join(' · ') +
+    (prevWc ? ` | Last wk: ${prevCombinedProg.done === prevCombinedProg.total ? '✅' : prevCombinedProg.done + '/' + prevCombinedProg.total}` : '') +
+    (combinedProg.done === combinedProg.total && combinedProg.total > 0 ? ' <span class="week-complete-badge">Complete</span>' : '');
 
-  // Settings section
-  const settingsSection = `
-    <div class="detail-section">
-      <div class="detail-section-title">Settings</div>
+  // Build nested sub-sections
+  const lfSubSection = collapsibleSub('lf-' + clientId, 'Long Form', `${lfProg.done}/${lfProg.total}`, renderStepRows(CHECKLIST_STEPS, 0));
+  const sfSubSection = hasSf ? collapsibleSub('sf-' + clientId, 'Short Form', `${sfProg.done}/${sfProg.total}`, renderStepRows(SF_STEPS, CHECKLIST_STEPS.length)) : '';
+  const wcSubSection = hasWc ? collapsibleSub('wc-' + clientId, 'Written Content', `${wcProg.done}/${wcProg.total}`, renderStepRows(WRITTEN_STEPS, CHECKLIST_STEPS.length + SF_STEPS.length)) : '';
 
-      <div class="settings-group-label">Core</div>
-      <div class="settings-row">
-        <span class="settings-label">Videos / week</span>
-        <input class="settings-input" id="settVpw" type="number" min="0" placeholder="0" value="${sett.videos_per_week || 0}" style="max-width:100px" />
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">Shorts / week</span>
-        <input class="settings-input" id="settSpw" type="number" min="0" placeholder="0" value="${sett.shorts_per_week || 0}" style="max-width:100px" />
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">Metricool ID</span>
-        <input class="settings-input" id="settMetricool" type="text" placeholder="brand-id" value="${escHTML(sett.metricool_id || '')}" />
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">Slack Channel</span>
-        <input class="settings-input" id="settSlack" type="text" placeholder="#client-cc-internal" value="${escHTML(sett.slack_channel || '')}" />
-      </div>
-      <div class="settings-group-label">GHL Integration</div>
-      <div class="settings-row">
-        <span class="settings-label">Location ID</span>
-        <input class="settings-input" id="settGhlLocationId" type="text" placeholder="GHL location/sub-account ID" value="${escHTML(sett.ghl_location_id || '')}" />
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">API Token</span>
-        <input class="settings-input" id="settGhlToken" type="password" placeholder="${sett.ghl_location_id ? '••••••• (saved — enter new to replace)' : 'pit-xxxxx (Private Integration token)'}" value="" />
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">Status</span>
-        <span id="ghlStatus" style="font-size:13px;color:${sett.ghl_location_id ? 'var(--green,#22c55e)' : 'var(--text-muted)'}">${sett.ghl_location_id ? 'Connected' : 'Not configured'}</span>
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">Lead Value ($/lead)</span>
-        <input class="settings-input" id="settLeadValue" type="number" min="0" step="0.01" placeholder="e.g. 10.00" value="${sett.lead_value_dollars || ''}" />
-      </div>
+  const weeklyChecklistBody = `<div id="weeklyChecklist-${client.id}">${lfSubSection}${sfSubSection}${wcSubSection}</div>`;
+  const weeklyChecklistSection = isProduction ? collapsibleSection('weekly', 'Weekly Checklist', wcSummary, weeklyChecklistBody, { defaultOpen: true }) : '';
 
-      <div class="settings-group-label">Client Links</div>
-      <div class="settings-row">
-        <span class="settings-label">📁 Google Drive</span>
-        <input class="settings-input" id="settGdrive" type="url" placeholder="https://drive.google.com/..." value="${escHTML(sett.gdrive_url || '')}" />
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">📝 SF Scripts</span>
-        <input class="settings-input" id="settSfScripts" type="url" placeholder="https://docs.google.com/..." value="${escHTML(sett.sf_scripts_url || '')}" />
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">📝 LF Scripts</span>
-        <input class="settings-input" id="settLfScripts" type="url" placeholder="https://docs.google.com/..." value="${escHTML(sett.lf_scripts_url || '')}" />
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">📎 Main Links</span>
-        <input class="settings-input" id="settMainLinks" type="url" placeholder="https://..." value="${escHTML(sett.main_links_url || '')}" />
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">📈 KPIs</span>
-        <input class="settings-input" id="settKpis" type="url" placeholder="https://..." value="${escHTML(sett.kpis_url || '')}" />
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">🚀 Growth Ops</span>
-        <input class="settings-input" id="settGrowthOps" type="url" placeholder="https://..." value="${escHTML(sett.growth_ops_url || '')}" />
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">✏️ Written Content</span>
-        <input class="settings-input" id="settWrittenContent" type="url" placeholder="https://docs.google.com/..." value="${escHTML(sett.written_content_url || '')}" />
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">🤖 AI</span>
-        <input class="settings-input" id="settAi" type="url" placeholder="https://..." value="${escHTML(sett.ai_url || '')}" />
-      </div>
-      <div class="settings-row">
-        <span class="settings-label">📱 Social Dashboard</span>
-        <input class="settings-input" id="settSocialDashboard" type="url" placeholder="https://..." value="${escHTML(sett.social_dashboard_url || '')}" />
-      </div>
+  // ── Settings section (collapsible) ──
+  const settingsConfigured = sett.metricool_id || sett.slack_channel || sett.ghl_location_id;
+  const settingsBody = `
+    <div class="settings-group-label">Core</div>
+    <div class="settings-row">
+      <span class="settings-label">Videos / week</span>
+      <input class="settings-input" id="settVpw" type="number" min="0" placeholder="0" value="${sett.videos_per_week || 0}" style="max-width:100px" />
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">Shorts / week</span>
+      <input class="settings-input" id="settSpw" type="number" min="0" placeholder="0" value="${sett.shorts_per_week || 0}" style="max-width:100px" />
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">Written / week</span>
+      <input class="settings-input" id="settWpw" type="number" min="0" placeholder="0" value="${sett.written_per_week || 0}" style="max-width:100px" />
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">Metricool ID</span>
+      <input class="settings-input" id="settMetricool" type="text" placeholder="brand-id" value="${escHTML(sett.metricool_id || '')}" />
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">Slack Channel</span>
+      <input class="settings-input" id="settSlack" type="text" placeholder="#client-cc-internal" value="${escHTML(sett.slack_channel || '')}" />
+    </div>
+    <div class="settings-group-label">GHL Integration</div>
+    <div class="settings-row">
+      <span class="settings-label">Location ID</span>
+      <input class="settings-input" id="settGhlLocationId" type="text" placeholder="GHL location/sub-account ID" value="${escHTML(sett.ghl_location_id || '')}" />
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">API Token</span>
+      <input class="settings-input" id="settGhlToken" type="password" placeholder="${sett.ghl_location_id ? '••••••• (saved)' : 'pit-xxxxx (Private Integration token)'}" value="" />
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">Status</span>
+      <span id="ghlStatus" style="font-size:13px;color:${sett.ghl_location_id ? 'var(--green,#22c55e)' : 'var(--text-muted)'}">${sett.ghl_location_id ? 'Connected' : 'Not configured'}</span>
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">Lead Value ($/lead)</span>
+      <input class="settings-input" id="settLeadValue" type="number" min="0" step="0.01" placeholder="e.g. 10.00" value="${sett.lead_value_dollars || ''}" />
+    </div>
 
-      <button class="btn-save" id="saveSettingsBtn">Save Settings</button>
-    </div>`;
+    <div class="settings-group-label">Client Links</div>
+    <div class="settings-row">
+      <span class="settings-label">📁 Google Drive</span>
+      <input class="settings-input" id="settGdrive" type="url" placeholder="https://drive.google.com/..." value="${escHTML(sett.gdrive_url || '')}" />
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">📝 SF Scripts</span>
+      <input class="settings-input" id="settSfScripts" type="url" placeholder="https://docs.google.com/..." value="${escHTML(sett.sf_scripts_url || '')}" />
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">📝 LF Scripts</span>
+      <input class="settings-input" id="settLfScripts" type="url" placeholder="https://docs.google.com/..." value="${escHTML(sett.lf_scripts_url || '')}" />
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">📎 Main Links</span>
+      <input class="settings-input" id="settMainLinks" type="url" placeholder="https://..." value="${escHTML(sett.main_links_url || '')}" />
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">📈 KPIs</span>
+      <input class="settings-input" id="settKpis" type="url" placeholder="https://..." value="${escHTML(sett.kpis_url || '')}" />
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">🚀 Growth Ops</span>
+      <input class="settings-input" id="settGrowthOps" type="url" placeholder="https://..." value="${escHTML(sett.growth_ops_url || '')}" />
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">✏️ Written Content</span>
+      <input class="settings-input" id="settWrittenContent" type="url" placeholder="https://docs.google.com/..." value="${escHTML(sett.written_content_url || '')}" />
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">🤖 AI</span>
+      <input class="settings-input" id="settAi" type="url" placeholder="https://..." value="${escHTML(sett.ai_url || '')}" />
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">📱 Social Dashboard</span>
+      <input class="settings-input" id="settSocialDashboard" type="url" placeholder="https://..." value="${escHTML(sett.social_dashboard_url || '')}" />
+    </div>
 
-  // Activity feed
+    <button class="btn-save" id="saveSettingsBtn">Save Settings</button>`;
+  const settingsSection = collapsibleSection('settings', 'Settings', settingsConfigured ? 'Configured' : 'Not configured', settingsBody);
+
+  // ── Activity feed (collapsible) ──
   const clientActivity = ACTIVITY_LOG.filter(a => a.client_id === clientId).slice(0, 15);
-  const activitySection = `
-    <div class="detail-section">
-      <div class="detail-section-title">Recent Activity</div>
-      ${clientActivity.length === 0 ? '<div class="empty-hint">No activity yet</div>' : clientActivity.map(a => `
-        <div class="activity-item">
-          <span class="activity-detail">${escHTML(a.detail)}</span>
-          <span class="activity-time">${timeAgo(a.created_at)}</span>
-        </div>`).join("")}
-    </div>`;
+  const activityBody = clientActivity.length === 0 ? '<div class="empty-hint">No activity yet</div>' : clientActivity.map(a => `
+    <div class="activity-item">
+      <span class="activity-detail">${escHTML(a.detail)}</span>
+      <span class="activity-time">${timeAgo(a.created_at)}</span>
+    </div>`).join("");
+  const activitySection = collapsibleSection('activity', 'Recent Activity', `${clientActivity.length} event${clientActivity.length !== 1 ? 's' : ''}`, activityBody);
 
   root.innerHTML = `
     <div class="detail-header">
       <div class="detail-name">${client.name}</div>
       <button class="delete-client-btn" id="deleteClientBtn" title="Remove client">Remove</button>
     </div>
-    ${actionLinksHTML}
     ${stepperHTML}
+    ${actionLinksSection}
     ${teamSection}
     ${onboardingChecklistSection}
     ${weeklyChecklistSection}
     ${settingsSection}
     ${activitySection}
   `;
+
+  // Bind collapsible toggles
+  bindCollapsibles(root);
 
   // ── BIND EVENTS ─────────────────────────────────────────────
 
@@ -909,6 +954,7 @@ function renderClientDetail(root, clientId) {
       await saveClientSettings(clientId, {
         videos_per_week:     parseInt(root.querySelector("#settVpw").value) || 0,
         shorts_per_week:     parseInt(root.querySelector("#settSpw").value) || 0,
+        written_per_week:    parseInt(root.querySelector("#settWpw").value) || 0,
         metricool_id:        root.querySelector("#settMetricool").value.trim(),
         slack_channel:       root.querySelector("#settSlack").value.trim(),
         ghl_location_id:     ghlLocationId,
@@ -951,6 +997,182 @@ function renderClientDetail(root, clientId) {
       renderClientDetail(root, clientId);
     });
   }
+}
+
+/* ── COMPANY LINKS VIEW ──────────────────────────────────────────── */
+async function renderCompanyLinks(root) {
+  // Password gate
+  const authed = sessionStorage.getItem('cc_company_auth');
+  if (!authed) {
+    root.innerHTML = `
+      <div class="company-gate">
+        <div class="gate-card">
+          <div class="gate-title">Company Links</div>
+          <p class="gate-desc">Enter the team password to access company resources.</p>
+          <input type="password" class="settings-input" id="gatePw" placeholder="Password..." autofocus />
+          <button class="btn-primary" id="gateSubmit" style="margin-top:10px;width:100%">Unlock</button>
+          <div class="gate-error" id="gateError" style="display:none">Incorrect password</div>
+        </div>
+      </div>`;
+    const pwInput = root.querySelector('#gatePw');
+    const submitBtn = root.querySelector('#gateSubmit');
+    const errEl = root.querySelector('#gateError');
+    const tryUnlock = () => {
+      if (pwInput.value === COMPANY_PASSWORD) {
+        sessionStorage.setItem('cc_company_auth', '1');
+        renderCompanyLinks(root);
+      } else {
+        errEl.style.display = 'block';
+        pwInput.value = '';
+        pwInput.focus();
+      }
+    };
+    submitBtn.addEventListener('click', tryUnlock);
+    pwInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryUnlock(); });
+    return;
+  }
+
+  // Load links from Supabase
+  const { data: links } = await sb.from('company_links').select('*').order('category').order('sort_order');
+  const allLinks = links || [];
+
+  // Group by category
+  const categories = {};
+  for (const link of allLinks) {
+    const cat = link.category || 'General';
+    if (!categories[cat]) categories[cat] = [];
+    categories[cat].push(link);
+  }
+
+  const catNames = Object.keys(categories);
+
+  root.innerHTML = `
+    <div class="company-page">
+      <div class="detail-header">
+        <div class="detail-name">Company Links</div>
+      </div>
+      <div id="companyLinksBody">
+        ${catNames.length === 0 ? '<div class="empty-hint">No links yet. Add one below.</div>' : catNames.map(cat => `
+          <div class="company-category">
+            <div class="company-cat-title">${escHTML(cat)}</div>
+            ${categories[cat].map(link => `
+              <div class="company-link-row" data-link-id="${link.id}">
+                <a class="company-link-label" href="${escHTML(link.url)}" target="_blank" rel="noopener">${escHTML(link.label)} ↗</a>
+                <span class="company-link-url">${escHTML(link.url)}</span>
+                <button class="company-link-delete" data-link-id="${link.id}" title="Delete">×</button>
+              </div>`).join('')}
+          </div>`).join('')}
+      </div>
+
+      <div class="company-add-section">
+        <div class="detail-section-title">Add Link</div>
+        <div class="settings-row">
+          <span class="settings-label">Category</span>
+          <input class="settings-input" id="newLinkCat" type="text" placeholder="e.g. Internal Tools" list="catSuggestions" />
+          <datalist id="catSuggestions">
+            ${catNames.map(c => `<option value="${escHTML(c)}">`).join('')}
+          </datalist>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Label</span>
+          <input class="settings-input" id="newLinkLabel" type="text" placeholder="e.g. n8n Dashboard" />
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">URL</span>
+          <input class="settings-input" id="newLinkUrl" type="url" placeholder="https://..." />
+        </div>
+        <button class="btn-primary" id="addLinkBtn" style="margin-top:8px">Add Link</button>
+      </div>
+    </div>`;
+
+  // ── Bind add link ──
+  root.querySelector('#addLinkBtn').addEventListener('click', async () => {
+    const category = root.querySelector('#newLinkCat').value.trim() || 'General';
+    const label = root.querySelector('#newLinkLabel').value.trim();
+    const url = root.querySelector('#newLinkUrl').value.trim();
+    if (!label || !url) return;
+
+    await sb.from('company_links').insert({ category, label, url, sort_order: 0 });
+    renderCompanyLinks(root);
+  });
+
+  // ── Bind delete links ──
+  root.querySelectorAll('.company-link-delete').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const linkId = parseInt(btn.dataset.linkId);
+      btn.textContent = '?';
+      btn.addEventListener('click', async () => {
+        await sb.from('company_links').delete().eq('id', linkId);
+        renderCompanyLinks(root);
+      }, { once: true });
+      setTimeout(() => { btn.textContent = '×'; }, 2000);
+    }, { once: true });
+  });
+}
+
+/* ── COLLAPSIBLE SECTION HELPERS ──────────────────────────────────── */
+function collapsibleSection(sectionKey, title, summaryHTML, bodyHTML, opts) {
+  opts = opts || {};
+  const stored = localStorage.getItem('cc_collapse_' + sectionKey);
+  const isOpen = stored !== null ? stored === '1' : (opts.defaultOpen || false);
+  return `
+    <div class="collapsible-section" data-section="${sectionKey}">
+      <button class="collapsible-header${isOpen ? ' open' : ''}" aria-expanded="${isOpen}">
+        <span class="collapsible-arrow">${isOpen ? '▾' : '▸'}</span>
+        <span class="collapsible-title">${title}</span>
+        <span class="collapsible-summary">${summaryHTML}</span>
+      </button>
+      <div class="collapsible-body" style="display:${isOpen ? 'block' : 'none'}">
+        ${bodyHTML}
+      </div>
+    </div>`;
+}
+
+function collapsibleSub(subKey, title, countHTML, bodyHTML) {
+  const stored = localStorage.getItem('cc_sub_' + subKey);
+  const isOpen = stored !== null ? stored === '1' : true;
+  return `
+    <div class="collapsible-sub" data-sub="${subKey}">
+      <button class="sub-header${isOpen ? ' open' : ''}">
+        <span class="sub-arrow">${isOpen ? '▾' : '▸'}</span>
+        <span class="sub-title">${title}</span>
+        <span class="sub-count">${countHTML}</span>
+      </button>
+      <div class="sub-body" style="display:${isOpen ? 'block' : 'none'}">
+        ${bodyHTML}
+      </div>
+    </div>`;
+}
+
+function bindCollapsibles(root) {
+  root.querySelectorAll('.collapsible-header').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const section = btn.closest('.collapsible-section');
+      const body = section.querySelector('.collapsible-body');
+      const arrow = btn.querySelector('.collapsible-arrow');
+      const isOpen = body.style.display !== 'none';
+      body.style.display = isOpen ? 'none' : 'block';
+      arrow.textContent = isOpen ? '▸' : '▾';
+      btn.classList.toggle('open', !isOpen);
+      btn.setAttribute('aria-expanded', !isOpen);
+      localStorage.setItem('cc_collapse_' + section.dataset.section, isOpen ? '0' : '1');
+    });
+  });
+  root.querySelectorAll('.sub-header').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const sub = btn.closest('.collapsible-sub');
+      const body = sub.querySelector('.sub-body');
+      const arrow = btn.querySelector('.sub-arrow');
+      const isOpen = body.style.display !== 'none';
+      body.style.display = isOpen ? 'none' : 'block';
+      arrow.textContent = isOpen ? '▸' : '▾';
+      btn.classList.toggle('open', !isOpen);
+      localStorage.setItem('cc_sub_' + sub.dataset.sub, isOpen ? '0' : '1');
+    });
+  });
 }
 
 /* ── UTILITY ─────────────────────────────────────────────────────── */
