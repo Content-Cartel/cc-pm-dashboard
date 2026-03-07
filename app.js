@@ -43,6 +43,12 @@ let ACTIVITY_LOG = [];
 
 /* ── LOAD DATA FROM SUPABASE ─────────────────────────────────────── */
 async function loadData() {
+  // ── Dashboard password gate ──
+  if (!sessionStorage.getItem('cc_dashboard_auth')) {
+    renderDashboardGate();
+    return;
+  }
+
   const [teamRes, clientRes, assignRes, checkRes, weeklyRes, settingsRes, activityRes] = await Promise.all([
     sb.from('team_members').select('*').order('id'),
     sb.from('clients').select('*').order('id'),
@@ -384,8 +390,47 @@ function timeAgo(dateStr) {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-/* ── ROUTER ───────────────────────────────────────────────────── */
+/* ── DASHBOARD PASSWORD GATE ────────────────────────────────────── */
 const COMPANY_PASSWORD = 'cc2025';
+const DASHBOARD_PASSWORD = 'ccpm2025';
+
+function renderDashboardGate() {
+  // Hide topbar pills while locked
+  const pills = document.getElementById('statPills');
+  if (pills) pills.style.visibility = 'hidden';
+
+  const root = document.getElementById('appRoot');
+  root.innerHTML = `
+    <div class="company-gate">
+      <div class="gate-card">
+        <div class="gate-title">CC PM Dashboard</div>
+        <p class="gate-desc">Enter the dashboard password to continue.</p>
+        <input type="password" class="settings-input" id="dashGatePw" placeholder="Password..." autofocus />
+        <button class="btn-primary" id="dashGateSubmit" style="margin-top:10px;width:100%">Unlock</button>
+        <div class="gate-error" id="dashGateError" style="display:none">Incorrect password</div>
+      </div>
+    </div>`;
+
+  const pwInput = root.querySelector('#dashGatePw');
+  const submitBtn = root.querySelector('#dashGateSubmit');
+  const errEl = root.querySelector('#dashGateError');
+
+  const tryUnlock = () => {
+    if (pwInput.value === DASHBOARD_PASSWORD) {
+      sessionStorage.setItem('cc_dashboard_auth', '1');
+      if (pills) pills.style.visibility = '';
+      loadData();
+    } else {
+      errEl.style.display = 'block';
+      pwInput.value = '';
+      pwInput.focus();
+    }
+  };
+  submitBtn.addEventListener('click', tryUnlock);
+  pwInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryUnlock(); });
+}
+
+/* ── ROUTER ───────────────────────────────────────────────────── */
 
 function getRoute() {
   const hash = location.hash || "#/";
@@ -395,6 +440,9 @@ function getRoute() {
   }
   if (path === "/company") {
     return { view: "company" };
+  }
+  if (path === "/team") {
+    return { view: "team" };
   }
   return { view: "pipeline" };
 }
@@ -410,12 +458,14 @@ function render() {
   root.style.animation = "";
 
   const backLink = document.getElementById("backLink");
-  if (backLink) backLink.classList.toggle("visible", route.view === "client" || route.view === "company");
+  if (backLink) backLink.classList.toggle("visible", route.view === "client" || route.view === "company" || route.view === "team");
 
   if (route.view === "client") {
     renderClientDetail(root, route.id);
   } else if (route.view === "company") {
     renderCompanyLinks(root);
+  } else if (route.view === "team") {
+    renderTeamManagement(root);
   } else {
     renderPipeline(root);
   }
@@ -1106,6 +1156,82 @@ async function renderCompanyLinks(root) {
       btn.addEventListener('click', async () => {
         await sb.from('company_links').delete().eq('id', linkId);
         renderCompanyLinks(root);
+      }, { once: true });
+      setTimeout(() => { btn.textContent = '×'; }, 2000);
+    }, { once: true });
+  });
+}
+
+/* ── TEAM MANAGEMENT VIEW ──────────────────────────────────────────── */
+function renderTeamManagement(root) {
+  const roles = ['LF Creative', 'SF Creative', 'LF Editor', 'SF Editor', 'CSM', 'Growth', 'Copywriter', 'Admin'];
+
+  root.innerHTML = `
+    <div class="company-page">
+      <div class="detail-header">
+        <div class="detail-name">Team Members</div>
+      </div>
+      <div id="teamListBody">
+        ${TEAM.length === 0 ? '<div class="empty-hint">No team members yet. Add one below.</div>' :
+          TEAM.map(m => `
+            <div class="company-link-row team-member-row" data-member-id="${m.id}">
+              <span class="team-initials-badge">${escHTML(m.initials)}</span>
+              <span class="team-member-name">${escHTML(m.name)}</span>
+              <span class="team-member-role">${escHTML(m.role)}</span>
+              <button class="company-link-delete team-delete-btn" data-member-id="${m.id}" title="Delete">×</button>
+            </div>`).join('')}
+      </div>
+
+      <div class="company-add-section">
+        <div class="detail-section-title">Add Team Member</div>
+        <div class="settings-row">
+          <span class="settings-label">Name</span>
+          <input class="settings-input" id="newMemberName" type="text" placeholder="e.g. Jane Doe" />
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Initials</span>
+          <input class="settings-input" id="newMemberInitials" type="text" placeholder="e.g. JD" maxlength="3" style="max-width:100px" />
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Role</span>
+          <select class="settings-input" id="newMemberRole">
+            ${roles.map(r => `<option value="${escHTML(r)}">${escHTML(r)}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn-primary" id="addMemberBtn" style="margin-top:8px">Add Member</button>
+      </div>
+    </div>`;
+
+  // ── Bind add member ──
+  root.querySelector('#addMemberBtn').addEventListener('click', async () => {
+    const name = root.querySelector('#newMemberName').value.trim();
+    const initials = root.querySelector('#newMemberInitials').value.trim().toUpperCase();
+    const role = root.querySelector('#newMemberRole').value;
+    if (!name || !initials) return;
+
+    const { data } = await sb.from('team_members').insert({ name, initials, role }).select();
+    if (data && data[0]) {
+      TEAM.push({ id: data[0].id, initials: data[0].initials, name: data[0].name, role: data[0].role });
+    }
+    renderTeamManagement(root);
+  });
+
+  // ── Bind delete members ──
+  root.querySelectorAll('.team-delete-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const memberId = parseInt(btn.dataset.memberId);
+      btn.textContent = '?';
+      btn.addEventListener('click', async () => {
+        await sb.from('client_team').delete().eq('team_member_id', memberId);
+        await sb.from('team_members').delete().eq('id', memberId);
+        TEAM = TEAM.filter(m => m.id !== memberId);
+        // Also remove from any loaded client team arrays
+        for (const c of CLIENTS) {
+          if (c.team) c.team = c.team.filter(id => id !== memberId);
+        }
+        renderTeamManagement(root);
       }, { once: true });
       setTimeout(() => { btn.textContent = '×'; }, 2000);
     }, { once: true });
