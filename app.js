@@ -21,7 +21,14 @@ const CHECKLIST_STEPS = [
 
 const N8N_CHECKLIST_WEBHOOK_URL = 'https://content-cartel-1.app.n8n.cloud/webhook/pm-checklist';
 const N8N_PHASE_WEBHOOK_URL = 'https://content-cartel-1.app.n8n.cloud/webhook/pm-phase-change';
+const N8N_EDIT_DELIVERED_WEBHOOK_URL = 'https://content-cartel-1.app.n8n.cloud/webhook/pm-edit-delivered';
 const ANALYTICS_BASE = 'https://analytics.contentcartel.net/#/client/';
+
+const SHORTS_STEPS = [
+  { key: 'shorts_edited',    label: 'Shorts edited',    owner: 'SF Editor' },
+  { key: 'shorts_published', label: 'Shorts published', owner: 'SF Creative' },
+];
+const ALL_STEPS = [...CHECKLIST_STEPS, ...SHORTS_STEPS];
 
 /* ── GLOBAL STATE ────────────────────────────────────────────────── */
 let TEAM = [];
@@ -177,7 +184,7 @@ async function toggleChecklistStep(clientId, stepKey, done, actor) {
   Object.assign(checklist, updates);
 
   const cl = getClient(clientId);
-  const stepLabel = CHECKLIST_STEPS.find(s => s.key === stepKey)?.label || stepKey;
+  const stepLabel = ALL_STEPS.find(s => s.key === stepKey)?.label || stepKey;
   const detail = actor
     ? `${actor} ${done ? 'checked' : 'unchecked'} "${stepLabel}" for "${cl?.name || '?'}"`
     : `"${stepLabel}" ${done ? 'checked' : 'unchecked'} for "${cl?.name || '?'}"`;
@@ -185,6 +192,7 @@ async function toggleChecklistStep(clientId, stepKey, done, actor) {
   logActivity(clientId, 'checklist_step_toggled', detail, actor);
 
   // Fire webhook for n8n
+  const activeSteps = cl ? getActiveSteps(cl) : CHECKLIST_STEPS;
   fireWebhookTo(N8N_CHECKLIST_WEBHOOK_URL, 'checklist_step_toggled', {
     client_name: cl?.name || '',
     client_id: clientId,
@@ -193,8 +201,35 @@ async function toggleChecklistStep(clientId, stepKey, done, actor) {
     done: done,
     actor: actor || '',
     week_start: checklist.week_start,
-    progress: checklistProgress(checklist),
+    progress: checklistProgress(checklist, activeSteps),
   });
+
+  // Slack notification when an edit is delivered (LF or Shorts)
+  if ((stepKey === 'edit_delivered' || stepKey === 'shorts_edited') && done) {
+    fireWebhookTo(N8N_EDIT_DELIVERED_WEBHOOK_URL, 'edit_delivered', {
+      client_name: cl?.name || '',
+      client_id: clientId,
+      step: stepKey,
+      step_label: stepLabel,
+      actor: actor || '',
+      slack_channel: cl?.settings?.slack_channel || '',
+      week_start: checklist.week_start,
+    });
+  }
+
+  // Auto-detect: all active steps complete → fire week-complete webhook
+  if (done) {
+    const allDone = activeSteps.every(s => checklist[s.key]);
+    if (allDone) {
+      fireWebhookTo(N8N_CHECKLIST_WEBHOOK_URL, 'week_complete', {
+        client_name: cl?.name || '',
+        client_id: clientId,
+        slack_channel: cl?.settings?.slack_channel || '',
+        week_start: checklist.week_start,
+      });
+      logActivity(clientId, 'week_complete', `All weekly steps completed for "${cl?.name || '?'}" 🎉`, actor);
+    }
+  }
 }
 
 /* ── CLIENT SETTINGS ─────────────────────────────────────────────── */
@@ -271,17 +306,27 @@ function getPreviousWeekStart() {
   return current.toISOString().split('T')[0];
 }
 
-function checklistProgress(checklist) {
-  if (!checklist) return { done: 0, total: CHECKLIST_STEPS.length };
+function checklistProgress(checklist, steps) {
+  steps = steps || CHECKLIST_STEPS;
+  if (!checklist) return { done: 0, total: steps.length };
   let done = 0;
-  for (const step of CHECKLIST_STEPS) {
+  for (const step of steps) {
     if (checklist[step.key]) done++;
   }
-  return { done, total: CHECKLIST_STEPS.length };
+  return { done, total: steps.length };
+}
+
+function shortsEnabled(client) {
+  return client.settings && client.settings.shorts_per_week > 0;
+}
+
+function getActiveSteps(client) {
+  return shortsEnabled(client) ? ALL_STEPS : CHECKLIST_STEPS;
 }
 
 function checklistProgressHTML(client) {
-  const prog = checklistProgress(client.weeklyChecklist);
+  const steps = getActiveSteps(client);
+  const prog = checklistProgress(client.weeklyChecklist, steps);
   if (prog.done === prog.total) {
     return `<span class="volume-counter on-track">${prog.done}/${prog.total} this wk</span>`;
   } else if (prog.done > 0) {
@@ -340,8 +385,8 @@ function render() {
   if (pillClients) pillClients.textContent = `${CLIENTS.length} clients`;
   const prodClients = CLIENTS.filter(c => c.phase === "production" || c.phase === "special");
   if (pillProd) pillProd.textContent = `${prodClients.length} in production`;
-  const totalChecked = prodClients.reduce((sum, c) => sum + checklistProgress(c.weeklyChecklist).done, 0);
-  const totalPossible = prodClients.length * CHECKLIST_STEPS.length;
+  const totalChecked = prodClients.reduce((sum, c) => sum + checklistProgress(c.weeklyChecklist, getActiveSteps(c)).done, 0);
+  const totalPossible = prodClients.reduce((sum, c) => sum + getActiveSteps(c).length, 0);
   if (pillDeliv) pillDeliv.textContent = `${totalChecked}/${totalPossible} steps done`;
 }
 
@@ -580,29 +625,44 @@ function renderClientDetail(root, clientId) {
   const prevWc = client.prevWeekChecklist;
   const prevWcProg = checklistProgress(prevWc);
 
+  const hasShorts = shortsEnabled(client);
+  const allSteps = getActiveSteps(client);
+  const combinedProg = checklistProgress(wc, allSteps);
+  const prevCombinedProg = checklistProgress(prevWc, getActiveSteps(client));
+
+  function renderStepRows(steps, startIdx) {
+    return steps.map((step, i) => {
+      const isDone = wc ? wc[step.key] : false;
+      const doneAt = wc ? wc[step.key + '_at'] : null;
+      const doneBy = wc ? wc[step.key + '_by'] : '';
+      return `
+      <div class="checklist-item weekly-check ${isDone ? 'done' : ''}" data-client="${client.id}" data-step="${step.key}" data-idx="${startIdx + i}">
+        <div class="check-box ${isDone ? 'checked' : ''}">
+          <span class="check-icon">✓</span>
+        </div>
+        <span class="checklist-label">${step.label}</span>
+        <span class="checklist-owner">${step.owner}</span>
+        ${isDone && doneBy ? `<span class="checklist-actor">${escHTML(doneBy)}</span>` : ''}
+        ${isDone && doneAt ? `<span class="checklist-time">${timeAgo(doneAt)}</span>` : ''}
+      </div>`;
+    }).join("");
+  }
+
   const weeklyChecklistSection = isProduction ? `
     <div class="detail-section">
       <div class="detail-section-title">
         Weekly Checklist
-        <span class="checklist-count" id="wcCount">${wcProg.done}/${wcProg.total}</span>
-        ${prevWc ? `<span class="prev-week-badge">${prevWcProg.done === prevWcProg.total ? 'Last wk: ✅' : 'Last wk: ' + prevWcProg.done + '/' + prevWcProg.total}</span>` : ''}
+        <span class="checklist-count" id="wcCount">${combinedProg.done}/${combinedProg.total}</span>
+        ${prevWc ? `<span class="prev-week-badge">${prevCombinedProg.done === prevCombinedProg.total ? 'Last wk: ✅' : 'Last wk: ' + prevCombinedProg.done + '/' + prevCombinedProg.total}</span>` : ''}
+        ${combinedProg.done === combinedProg.total && combinedProg.total > 0 ? '<span class="week-complete-badge">Week Complete 🎉</span>' : ''}
       </div>
       <div id="weeklyChecklist-${client.id}">
-        ${CHECKLIST_STEPS.map((step, i) => {
-          const isDone = wc ? wc[step.key] : false;
-          const doneAt = wc ? wc[step.key + '_at'] : null;
-          const doneBy = wc ? wc[step.key + '_by'] : '';
-          return `
-          <div class="checklist-item weekly-check ${isDone ? 'done' : ''}" data-client="${client.id}" data-step="${step.key}" data-idx="${i}">
-            <div class="check-box ${isDone ? 'checked' : ''}">
-              <span class="check-icon">✓</span>
-            </div>
-            <span class="checklist-label">${step.label}</span>
-            <span class="checklist-owner">${step.owner}</span>
-            ${isDone && doneBy ? `<span class="checklist-actor">${escHTML(doneBy)}</span>` : ''}
-            ${isDone && doneAt ? `<span class="checklist-time">${timeAgo(doneAt)}</span>` : ''}
-          </div>`;
-        }).join("")}
+        <div class="checklist-divider">Long Form</div>
+        ${renderStepRows(CHECKLIST_STEPS, 0)}
+        ${hasShorts ? `
+          <div class="checklist-divider">Shorts</div>
+          ${renderStepRows(SHORTS_STEPS, CHECKLIST_STEPS.length)}
+        ` : ''}
       </div>
     </div>` : '';
 
@@ -615,6 +675,10 @@ function renderClientDetail(root, clientId) {
       <div class="settings-row">
         <span class="settings-label">Videos / week</span>
         <input class="settings-input" id="settVpw" type="number" min="0" placeholder="0" value="${sett.videos_per_week || 0}" style="max-width:100px" />
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Shorts / week</span>
+        <input class="settings-input" id="settSpw" type="number" min="0" placeholder="0" value="${sett.shorts_per_week || 0}" style="max-width:100px" />
       </div>
       <div class="settings-row">
         <span class="settings-label">Metricool ID</span>
@@ -787,12 +851,23 @@ function renderClientDetail(root, clientId) {
       const check = cl.onboardingChecks[idx];
       check.done = !check.done;
       await toggleCheckDB(check.id, check.done);
+      logActivity(clientId, 'checklist_toggled', `"${check.label}" ${check.done ? 'completed' : 'unchecked'} for "${cl.name}"`);
+
+      // Auto-advance: all onboarding steps done → move to production
+      const allOnboardingDone = cl.onboardingChecks.every(c => c.done);
+      if (allOnboardingDone && check.done) {
+        await updatePhase(clientId, 'production');
+        cl.phase = 'production';
+        logActivity(clientId, 'auto_advanced', `"${cl.name}" auto-moved to Production (onboarding complete) 🚀`);
+        renderClientDetail(root, clientId);
+        return;
+      }
+
       item.classList.toggle("done", check.done);
       item.querySelector(".check-box").classList.toggle("checked", check.done);
       const prog2 = onboardingProgress(cl);
       const countEl = root.querySelector(".checklist-count");
       if (countEl && prog2) countEl.textContent = `${prog2.done}/${prog2.total}`;
-      logActivity(clientId, 'checklist_toggled', `"${check.label}" ${check.done ? 'completed' : 'unchecked'} for "${cl.name}"`);
     });
   });
 
@@ -833,6 +908,7 @@ function renderClientDetail(root, clientId) {
       // Save settings to Supabase (token is NOT stored in Supabase)
       await saveClientSettings(clientId, {
         videos_per_week:     parseInt(root.querySelector("#settVpw").value) || 0,
+        shorts_per_week:     parseInt(root.querySelector("#settSpw").value) || 0,
         metricool_id:        root.querySelector("#settMetricool").value.trim(),
         slack_channel:       root.querySelector("#settSlack").value.trim(),
         ghl_location_id:     ghlLocationId,

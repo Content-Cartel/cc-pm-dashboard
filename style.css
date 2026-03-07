@@ -556,6 +556,25 @@ button { cursor: pointer; font-family: var(--font); }
   font-size: 10px; color: #71717A; margin-left: 4px;
 }
 
+/* Checklist section dividers (Long Form / Shorts) */
+.checklist-divider {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text-3);
+  padding: 10px 0 4px;
+}
+.checklist-divider:first-child { padding-top: 0; }
+.checklist-divider:not(:first-child) {
+  margin-top: 6px; border-top: 1px solid var(--border);
+}
+
+/* Week complete badge */
+.week-complete-badge {
+  font-size: 10px; font-weight: 700;
+  color: var(--green); background: rgba(34,197,94,0.12);
+  border: 1px solid rgba(34,197,94,0.3);
+  border-radius: 999px; padding: 2px 10px; margin-left: auto;
+}
+
 @media (max-width: 900px) {
   .pipeline-board { grid-template-columns: 1fr; }
   .phase-stepper { flex-wrap: wrap; }
