@@ -403,7 +403,8 @@ function renderDashboardGate() {
   root.innerHTML = `
     <div class="company-gate">
       <div class="gate-card">
-        <div class="gate-title">CC PM Dashboard</div>
+        <img src="./logo.png" alt="Content Cartel" style="height:64px;width:auto;margin-bottom:16px;">
+        <div class="gate-title">PM Dashboard</div>
         <p class="gate-desc">Enter the dashboard password to continue.</p>
         <input type="password" class="settings-input" id="dashGatePw" placeholder="Password..." autofocus />
         <button class="btn-primary" id="dashGateSubmit" style="margin-top:10px;width:100%">Unlock</button>

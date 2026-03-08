@@ -50,8 +50,8 @@ button { cursor: pointer; font-family: var(--font); }
   z-index: 100;
 }
 
-.logo-cc { font-size: 16px; font-weight: 800; color: var(--gold); letter-spacing: -0.5px; }
-.logo-pm { font-size: 16px; font-weight: 800; color: var(--text); margin-left: 2px; letter-spacing: -0.5px; }
+.logo-img { height: 28px; width: auto; margin-right: 4px; vertical-align: middle; }
+.logo-pm { font-size: 16px; font-weight: 800; color: var(--text); letter-spacing: -0.5px; vertical-align: middle; }
 
 .topbar-center { display: flex; align-items: center; gap: 6px; }
 
