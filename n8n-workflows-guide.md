@@ -845,3 +845,365 @@ Instead of watching for the word "scripts", create a Slack Workflow (Slack's bui
 5. **WF10** — Auto-Check: Published (piggyback on YouTube Upload)
 6. **WF11** — Auto-Check: Scripts Sent (Slack trigger)
 7. **WF12** — Debug and fix Auto Cleaner
+
+---
+---
+
+# PHASE 2: PM Dashboard Auto-Check Integrations
+
+These 4 automations connect your existing n8n workflows to the PM dashboard's weekly checklist in Supabase. When a file lands in Drive or a video goes live on YouTube, the corresponding checklist step gets auto-checked — no one has to open the dashboard manually.
+
+**Supabase credentials** (same ones you already set up):
+- Host: `https://andcsslmnogpuntfuouh.supabase.co`
+- Use your **service_role** key (not anon)
+
+**How the checklist works:**
+- Table: `weekly_checklist`
+- Each row = one client + one week (keyed by `client_id` + `week_start`)
+- `week_start` is always a Monday in `YYYY-MM-DD` format
+- Each step has 3 columns: `{step}` (boolean), `{step}_at` (timestamp), `{step}_by` (who did it)
+
+---
+
+## INTEGRATION 1: Auto Clean → Check "Footage Received"
+
+**What this does:** After the Auto Clean workflow finishes processing a video and uploads it to the PROCESSED folder, it auto-checks "Footage received" for that client in the PM dashboard.
+
+**Where to add it:** Open your existing **Auto Clean** workflow in n8n. Find the node that uploads the processed file (the last node, usually named something like "Upload to PROCESSED" or "Google Drive — Upload"). You're adding 3 nodes after it.
+
+### Node A — Function: "Get Client + Week"
+
+Add a **Function** node connected to the output of the upload node.
+
+Name it: `Get Client + Week`
+
+Code:
+```javascript
+// ── 1. Figure out which Monday this week started on ──
+const now = new Date();
+const day = now.getDay(); // 0 = Sun, 1 = Mon, ...
+const diff = day === 0 ? 6 : day - 1;
+const monday = new Date(now);
+monday.setDate(now.getDate() - diff);
+monday.setHours(0, 0, 0, 0);
+const weekStart = monday.toISOString().split('T')[0]; // "2025-03-03"
+
+// ── 2. Extract client name from the Drive folder path ──
+// The Auto Clean workflow should have the folder path somewhere
+// in the previous node output. Adjust the field name to match
+// YOUR workflow — common names: folderPath, path, parents[0].name
+//
+// Expected folder structure: {Client Name}/LF/Raw/filename.mp4
+// We want the top-level folder name = client name.
+//
+// Option A: If your upload node returns a folder path string:
+const folderPath = $input.item.json.folderPath
+  || $input.item.json.path
+  || $input.item.json.name
+  || '';
+const clientName = folderPath.split('/')[0].trim();
+
+// Option B: If you KNOW which client this workflow handles
+// (e.g., you have one Auto Clean per client), just hardcode it:
+// const clientName = 'Ryan D. Lee';
+
+return {
+  client_name: clientName,
+  week_start: weekStart,
+  step: 'footage_received',
+  timestamp: new Date().toISOString()
+};
+```
+
+### Node B — Supabase: "Lookup Client ID"
+
+Add a **Supabase** node.
+
+- **Operation:** Get Many
+- **Table:** `clients`
+- **Filters:** `name` equals `{{ $json.client_name }}`
+- **Limit:** 1
+
+### Node C — Supabase: "Check Off Footage Received"
+
+Add a **Supabase** node.
+
+- **Operation:** Update
+- **Table:** `weekly_checklist`
+- **Filters (ALL must match):**
+  - `client_id` equals `{{ $('Lookup Client ID').item.json.id }}`
+  - `week_start` equals `{{ $('Get Client + Week').item.json.week_start }}`
+- **Fields to set:**
+
+| Column | Value |
+|--------|-------|
+| `footage_received` | `true` |
+| `footage_received_at` | `{{ $('Get Client + Week').item.json.timestamp }}` |
+| `footage_received_by` | `auto:drive` |
+
+### If the checklist row doesn't exist yet
+
+The dashboard auto-creates checklist rows when someone opens a client page. But if the automation fires before anyone opens the dashboard that week, the row won't exist and the Update will silently do nothing.
+
+**Fix:** Change Node C from "Update" to "Upsert" and add these conflict columns: `client_id`, `week_start`. This creates the row if it's missing.
+
+### Test
+
+1. Run the Auto Clean workflow manually with a test video
+2. Open `pm.contentcartel.net` → go to that client
+3. "Footage received" should be checked with a timestamp and "auto:drive" as the actor
+
+---
+
+## INTEGRATION 2: YouTube Upload → Check "Published"
+
+**What this does:** After a video is successfully uploaded/scheduled to YouTube, auto-checks "Published" for that client.
+
+**Where to add it:** Open your existing **YouTube Upload / Auto Scheduler** workflow. Find the node that confirms a successful YouTube upload (after "Schedule YouTube" or the final success node). Add 2 nodes after it.
+
+### Node A — Function: "Get Week Start"
+
+Add a **Function** node.
+
+Name it: `Get Week Start`
+
+Code:
+```javascript
+const now = new Date();
+const day = now.getDay();
+const diff = day === 0 ? 6 : day - 1;
+const monday = new Date(now);
+monday.setDate(now.getDate() - diff);
+monday.setHours(0, 0, 0, 0);
+
+return {
+  week_start: monday.toISOString().split('T')[0],
+  timestamp: new Date().toISOString(),
+  // Pass through the client_id from earlier in the workflow.
+  // Adjust this field name to match YOUR workflow's data:
+  client_id: $input.item.json.client_id
+    || $input.item.json.clientId
+    || null
+};
+```
+
+> **Important:** This assumes your YouTube Upload workflow already knows which client the video belongs to (via `client_id` somewhere in the chain). If it doesn't, you'll need to add a Supabase lookup by client name — same as Integration 1, Nodes B+C.
+
+### Node B — Supabase: "Check Off Published"
+
+Add a **Supabase** node.
+
+- **Operation:** Update (or Upsert with conflict on `client_id` + `week_start`)
+- **Table:** `weekly_checklist`
+- **Filters:**
+  - `client_id` equals `{{ $json.client_id }}`
+  - `week_start` equals `{{ $json.week_start }}`
+- **Fields to set:**
+
+| Column | Value |
+|--------|-------|
+| `published` | `true` |
+| `published_at` | `{{ $json.timestamp }}` |
+| `published_by` | `auto:youtube` |
+
+### Test
+
+1. Run the YouTube Upload workflow manually with a test video
+2. Open `pm.contentcartel.net` → go to that client
+3. "Published" should be checked with a timestamp and "auto:youtube" as the actor
+
+---
+
+## INTEGRATION 3: Monday Reset → Also Clear SF + Written Columns
+
+**What this does:** The existing Monday reset already clears the LF checklist columns each week. We're extending it to also clear the Short Form (SF) and Written Content (WC) columns.
+
+**Where to add it:** Open your existing **Monday Video Checklist Reset** workflow. Find the Supabase Update node that resets the checklist columns.
+
+### What to change
+
+In the Supabase Update node, add these columns to the existing reset. Every column below should be set to the value shown:
+
+**SF columns to add:**
+
+| Column | Reset Value |
+|--------|-------------|
+| `sf_clips_delivered` | `false` |
+| `sf_clips_delivered_at` | *(empty / null)* |
+| `sf_clips_delivered_by` | *(empty string)* |
+| `sf_qc_approved` | `false` |
+| `sf_qc_approved_at` | *(empty / null)* |
+| `sf_qc_approved_by` | *(empty string)* |
+| `sf_published` | `false` |
+| `sf_published_at` | *(empty / null)* |
+| `sf_published_by` | *(empty string)* |
+
+**Written Content columns to add:**
+
+| Column | Reset Value |
+|--------|-------------|
+| `wc_draft_sent` | `false` |
+| `wc_draft_sent_at` | *(empty / null)* |
+| `wc_draft_sent_by` | *(empty string)* |
+| `wc_approved` | `false` |
+| `wc_approved_at` | *(empty / null)* |
+| `wc_approved_by` | *(empty string)* |
+| `wc_published` | `false` |
+| `wc_published_at` | *(empty / null)* |
+| `wc_published_by` | *(empty string)* |
+
+**If the reset uses a Function node** instead of setting columns directly in the Supabase node, add this to the existing reset object:
+
+```javascript
+// Add these to whatever object you're already building:
+const resetFields = {
+  // ... your existing LF resets stay here ...
+
+  // SF resets
+  sf_clips_delivered: false,
+  sf_clips_delivered_at: null,
+  sf_clips_delivered_by: '',
+  sf_qc_approved: false,
+  sf_qc_approved_at: null,
+  sf_qc_approved_by: '',
+  sf_published: false,
+  sf_published_at: null,
+  sf_published_by: '',
+
+  // Written Content resets
+  wc_draft_sent: false,
+  wc_draft_sent_at: null,
+  wc_draft_sent_by: '',
+  wc_approved: false,
+  wc_approved_at: null,
+  wc_approved_by: '',
+  wc_published: false,
+  wc_published_at: null,
+  wc_published_by: '',
+};
+```
+
+### Test
+
+1. Manually trigger the Monday Reset workflow
+2. Open `pm.contentcartel.net` → check a client that had SF or Written steps checked
+3. All SF and Written checkboxes should now be unchecked
+
+---
+
+## INTEGRATION 4: New Workflow — Auto-Check "Edit Delivered" (Google Drive Trigger)
+
+**What this does:** When an edited video file is added to a client's `LF/Edited/` folder in Google Drive, auto-checks "Edit delivered" in the PM dashboard and fires a Slack notification.
+
+**Setup:** Create one small workflow per client. Each workflow watches that client's specific `LF/Edited/` folder. To add a new client, duplicate the workflow and change the folder ID + client ID.
+
+### Step 1: Get the folder ID
+
+1. Open Google Drive
+2. Navigate to the client's folder → `LF` → `Edited`
+3. Copy the folder ID from the URL: `https://drive.google.com/drive/folders/{THIS_IS_THE_ID}`
+
+### Step 2: Create the workflow
+
+Create a **new workflow** in n8n. Name it: `Auto-Check: Edit Delivered — {Client Name}`
+
+### Node 1 — Google Drive Trigger
+
+- **Node type:** Google Drive Trigger
+- **Event:** File Created
+- **Folder:** Paste the `LF/Edited/` folder ID from Step 1
+- **Credential:** Your Google Drive OAuth2
+
+### Node 2 — Function: "Prepare Update"
+
+```javascript
+// ── Hardcode the client details for this workflow ──
+// Change these two values for each client:
+const CLIENT_ID = 7;           // ← the client's ID from the clients table
+const CLIENT_NAME = 'Ryan D. Lee'; // ← for the Slack notification
+
+// ── Calculate the current week's Monday ──
+const now = new Date();
+const day = now.getDay();
+const diff = day === 0 ? 6 : day - 1;
+const monday = new Date(now);
+monday.setDate(now.getDate() - diff);
+monday.setHours(0, 0, 0, 0);
+
+return {
+  client_id: CLIENT_ID,
+  client_name: CLIENT_NAME,
+  week_start: monday.toISOString().split('T')[0],
+  timestamp: new Date().toISOString(),
+  file_name: $json.name || 'unknown'
+};
+```
+
+### Node 3 — Supabase: "Check Off Edit Delivered"
+
+- **Operation:** Upsert
+- **Table:** `weekly_checklist`
+- **Conflict columns:** `client_id`, `week_start`
+- **Fields to set:**
+
+| Column | Value |
+|--------|-------|
+| `client_id` | `{{ $json.client_id }}` |
+| `week_start` | `{{ $json.week_start }}` |
+| `edit_delivered` | `true` |
+| `edit_delivered_at` | `{{ $json.timestamp }}` |
+| `edit_delivered_by` | `auto:drive` |
+
+### Node 4 — HTTP Request: "Fire Edit Delivered Webhook"
+
+This sends a Slack notification via the existing PM webhook.
+
+- **Method:** POST
+- **URL:** `https://content-cartel-1.app.n8n.cloud/webhook/pm-edit-delivered`
+- **Body type:** JSON
+- **Body:**
+
+```json
+{
+  "event": "edit_delivered",
+  "client_name": "{{ $('Prepare Update').item.json.client_name }}",
+  "client_id": {{ $('Prepare Update').item.json.client_id }},
+  "step": "edit_delivered",
+  "step_label": "Edit delivered",
+  "actor": "auto:drive",
+  "file_name": "{{ $('Prepare Update').item.json.file_name }}",
+  "week_start": "{{ $('Prepare Update').item.json.week_start }}"
+}
+```
+
+### Step 3: Activate the workflow
+
+Toggle the workflow **ON** so the Drive trigger starts listening.
+
+### Step 4: Duplicate for each client
+
+1. Open the workflow → click the `...` menu → **Duplicate**
+2. In the duplicate, change 3 things:
+   - **Workflow name** → new client name
+   - **Node 1 (Drive Trigger)** → change folder ID to the new client's `LF/Edited/` folder
+   - **Node 2 (Function)** → change `CLIENT_ID` and `CLIENT_NAME`
+3. Activate the duplicate
+
+### Test
+
+1. Drop a test file into a client's `LF/Edited/` folder in Google Drive
+2. Wait 30–60 seconds for the trigger to fire
+3. Open `pm.contentcartel.net` → go to that client
+4. "Edit delivered" should be checked with "auto:drive" as the actor
+5. Check Slack for the notification
+
+---
+
+## Quick Reference: All Auto-Check Integrations
+
+| Trigger | Step Checked | `_by` Value | Where |
+|---------|-------------|-------------|-------|
+| Auto Clean finishes | `footage_received` | `auto:drive` | Added to existing Auto Clean workflow |
+| YouTube upload succeeds | `published` | `auto:youtube` | Added to existing YouTube Upload workflow |
+| Monday morning reset | *(clears SF + Written)* | — | Extended existing Monday Reset workflow |
+| File in `LF/Edited/` | `edit_delivered` | `auto:drive` | New standalone workflow (one per client) |
