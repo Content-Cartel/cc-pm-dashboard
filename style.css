@@ -230,7 +230,22 @@ button { cursor: pointer; font-family: var(--font); }
 .team-member-row {
   display: flex; align-items: center; gap: 10px;
   padding: 7px 0; border-bottom: 1px solid var(--border);
+  cursor: pointer; border-radius: var(--radius-sm);
+  transition: background var(--transition);
 }
+.team-member-row:hover:not(.editing) { background: var(--surface2); }
+.team-member-row.editing {
+  background: var(--surface2); padding: 8px; gap: 6px;
+  cursor: default; flex-wrap: wrap;
+}
+.team-member-row.editing .settings-input { font-size: 12px; padding: 5px 8px; flex: 1; min-width: 0; }
+.team-edit-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.btn-secondary {
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-2);
+  border-radius: var(--radius-sm); cursor: pointer; font-family: var(--font);
+  transition: all var(--transition);
+}
+.btn-secondary:hover { border-color: var(--border2); color: var(--text); }
 .team-member-name { font-size: 13px; font-weight: 600; color: var(--text); min-width: 100px; flex: 1; }
 .team-member-role { font-size: 12px; color: var(--text-3); flex: 1; }
 .empty-hint { font-size: 12px; color: var(--text-3); padding: 8px 0; }

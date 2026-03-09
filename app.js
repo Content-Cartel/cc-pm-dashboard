@@ -1205,37 +1205,133 @@ function renderTeamManagement(root) {
 
   // ── Bind add member ──
   root.querySelector('#addMemberBtn').addEventListener('click', async () => {
-    const name = root.querySelector('#newMemberName').value.trim();
-    const initials = root.querySelector('#newMemberInitials').value.trim().toUpperCase();
-    const role = root.querySelector('#newMemberRole').value;
-    if (!name || !initials) return;
+    try {
+      const nameInput = root.querySelector('#newMemberName');
+      const initialsInput = root.querySelector('#newMemberInitials');
+      const name = nameInput.value.trim();
+      const initials = initialsInput.value.trim().toUpperCase();
+      const role = root.querySelector('#newMemberRole').value;
 
-    const { data } = await sb.from('team_members').insert({ name, initials, role }).select();
-    if (data && data[0]) {
+      if (!name || !initials) {
+        if (!name) nameInput.style.borderColor = 'var(--red)';
+        if (!initials) initialsInput.style.borderColor = 'var(--red)';
+        return;
+      }
+
+      const addBtn = root.querySelector('#addMemberBtn');
+      addBtn.disabled = true;
+      addBtn.textContent = 'Adding…';
+
+      const res = await sb.from('team_members').insert({ name, initials, role }).select();
+      console.log('Insert full response:', JSON.stringify(res));
+      const { data, error } = res;
+      if (error) {
+        addBtn.disabled = false;
+        addBtn.textContent = 'Add Member';
+        alert('Failed to add member: ' + (error.message || JSON.stringify(error)));
+        return;
+      }
+      if (!data || !data[0]) {
+        addBtn.disabled = false;
+        addBtn.textContent = 'Add Member';
+        alert('Insert returned no data. Check RLS policies on team_members (INSERT for anon role).');
+        return;
+      }
       TEAM.push({ id: data[0].id, initials: data[0].initials, name: data[0].name, role: data[0].role });
+      renderTeamManagement(root);
+    } catch (err) {
+      console.error('Add member exception:', err);
+      alert('Error adding member: ' + err.message);
+      const addBtn = root.querySelector('#addMemberBtn');
+      if (addBtn) { addBtn.disabled = false; addBtn.textContent = 'Add Member'; }
     }
-    renderTeamManagement(root);
   });
 
   // ── Bind delete members ──
   root.querySelectorAll('.team-delete-btn').forEach(btn => {
+    let confirmTimeout = null;
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
       const memberId = parseInt(btn.dataset.memberId);
-      btn.textContent = '?';
-      btn.addEventListener('click', async () => {
+
+      if (btn.dataset.confirm === '1') {
+        // Second click — perform delete
+        clearTimeout(confirmTimeout);
+        btn.disabled = true;
+        btn.textContent = '…';
         await sb.from('client_team').delete().eq('team_member_id', memberId);
         await sb.from('team_members').delete().eq('id', memberId);
         TEAM = TEAM.filter(m => m.id !== memberId);
-        // Also remove from any loaded client team arrays
         for (const c of CLIENTS) {
           if (c.team) c.team = c.team.filter(id => id !== memberId);
         }
         renderTeamManagement(root);
-      }, { once: true });
-      setTimeout(() => { btn.textContent = '×'; }, 2000);
-    }, { once: true });
+      } else {
+        // First click — enter confirm state
+        btn.dataset.confirm = '1';
+        btn.textContent = '?';
+        btn.title = 'Click again to confirm delete';
+        confirmTimeout = setTimeout(() => {
+          btn.textContent = '×';
+          btn.title = 'Delete';
+          delete btn.dataset.confirm;
+        }, 2000);
+      }
+    });
+  });
+
+  // ── Bind edit members (click row to edit inline) ──
+  root.querySelectorAll('.team-member-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.team-delete-btn')) return;  // ignore delete clicks
+      if (root.querySelector('.team-member-row.editing')) return;  // one at a time
+
+      const memberId = parseInt(row.dataset.memberId);
+      const member = TEAM.find(m => m.id === memberId);
+      if (!member) return;
+
+      row.classList.add('editing');
+      row.innerHTML = `
+        <input class="settings-input team-edit-name" type="text" value="${escHTML(member.name)}" placeholder="Name" />
+        <input class="settings-input team-edit-initials" type="text" value="${escHTML(member.initials)}" maxlength="3" placeholder="XX" style="max-width:70px" />
+        <select class="settings-input team-edit-role">
+          ${roles.map(r => `<option value="${escHTML(r)}"${r === member.role ? ' selected' : ''}>${escHTML(r)}</option>`).join('')}
+        </select>
+        <div class="team-edit-actions">
+          <button class="btn-primary team-edit-save" style="padding:4px 12px;font-size:12px">Save</button>
+          <button class="btn-secondary team-edit-cancel" style="padding:4px 12px;font-size:12px">Cancel</button>
+        </div>`;
+
+      row.querySelector('.team-edit-cancel').addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        renderTeamManagement(root);
+      });
+
+      row.querySelector('.team-edit-save').addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const newName = row.querySelector('.team-edit-name').value.trim();
+        const newInitials = row.querySelector('.team-edit-initials').value.trim().toUpperCase();
+        const newRole = row.querySelector('.team-edit-role').value;
+        if (!newName || !newInitials) return;
+
+        const saveBtn = row.querySelector('.team-edit-save');
+        saveBtn.disabled = true;
+        saveBtn.textContent = '…';
+
+        const { error } = await sb.from('team_members').update({ name: newName, initials: newInitials, role: newRole }).eq('id', memberId);
+        if (!error) {
+          member.name = newName;
+          member.initials = newInitials;
+          member.role = newRole;
+        }
+        renderTeamManagement(root);
+      });
+
+      // Auto-focus the name input
+      const nameInput = row.querySelector('.team-edit-name');
+      if (nameInput) nameInput.focus();
+    });
   });
 }
 
