@@ -144,8 +144,18 @@ async function toggleCheckDB(checkId, done) {
 
 async function createOnboardingChecks(clientId) {
   const labels = [
-    'Welcome kit sent', 'Story Call scheduled', 'Battle Plan Call scheduled',
-    'Client AI built', 'Content strategy done', 'First video filmed', 'GHL snapshot cloned'
+    'All links were duplicated (scripts, drive, slack, etc)',
+    'Team was assigned',
+    'Onboarding Doc Sent to client',
+    'Onboarding call with client finished',
+    'Client AI was made',
+    'First LF videos planned (topic/script)',
+    'First SF videos planned (topic/script)',
+    'Access to YouTube as a manager',
+    'Client Sent Branding Material',
+    'Funnel + Lead Magnet planned (alongside GHL creation/duplication)',
+    'Client Socials connected to metricool',
+    'First recording planned',
   ];
   const rows = labels.map(label => ({ client_id: clientId, label, done: false }));
   const { data } = await sb.from('onboarding_checks').insert(rows).select();
