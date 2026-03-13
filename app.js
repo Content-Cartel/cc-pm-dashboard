@@ -148,6 +148,7 @@ async function createOnboardingChecks(clientId) {
     'Team was assigned',
     'Onboarding Doc Sent to client',
     'Onboarding call with client finished',
+    'Strategy call made',
     'Client AI was made',
     'First LF videos planned (topic/script)',
     'First SF videos planned (topic/script)',
