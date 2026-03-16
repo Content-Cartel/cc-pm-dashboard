@@ -674,6 +674,7 @@ function renderClientDetail(root, clientId) {
     { url: sett.written_content_url,   label: '✏️ Written Content' },
     { url: sett.ai_url,                label: '🤖 AI' },
     { url: sett.social_dashboard_url,  label: '📱 Social Dashboard' },
+    { url: sett.dna_doc_url,           label: '🧬 Client DNA' },
   ].filter(l => l.url && l.url.trim());
   const allLinkCount = clientLinks.length + (hasAnalytics ? 1 : 0);
   const hasAnyLinks = allLinkCount > 0;
@@ -849,6 +850,10 @@ function renderClientDetail(root, clientId) {
     <div class="settings-row">
       <span class="settings-label">📱 Social Dashboard</span>
       <input class="settings-input" id="settSocialDashboard" type="url" placeholder="https://..." value="${escHTML(sett.social_dashboard_url || '')}" />
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">🧬 Client DNA</span>
+      <input class="settings-input" id="settDnaDoc" type="url" placeholder="https://docs.google.com/..." value="${escHTML(sett.dna_doc_url || '')}" />
     </div>
 
     <button class="btn-save" id="saveSettingsBtn">Save Settings</button>`;
@@ -1030,6 +1035,7 @@ function renderClientDetail(root, clientId) {
         written_content_url: root.querySelector("#settWrittenContent").value.trim(),
         ai_url:              root.querySelector("#settAi").value.trim(),
         social_dashboard_url:root.querySelector("#settSocialDashboard").value.trim(),
+        dna_doc_url:         root.querySelector("#settDnaDoc").value.trim(),
       });
 
       // If GHL token provided, store it on the analytics server
