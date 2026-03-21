@@ -49,7 +49,7 @@ async function loadData() {
     return;
   }
 
-  const [teamRes, clientRes, assignRes, checkRes, weeklyRes, settingsRes, activityRes] = await Promise.all([
+  const [teamRes, clientRes, assignRes, checkRes, weeklyRes, settingsRes, activityRes, goalsRes] = await Promise.all([
     sb.from('team_members').select('*').order('id'),
     sb.from('clients').select('*').order('id'),
     sb.from('client_team').select('*'),
@@ -57,6 +57,7 @@ async function loadData() {
     sb.from('weekly_checklist').select('*').order('week_start', { ascending: false }),
     sb.from('client_settings').select('*'),
     sb.from('activity_log').select('*').order('created_at', { ascending: false }).limit(200),
+    sb.from('client_goals').select('*').order('created_at', { ascending: false }),
   ]);
 
   TEAM = (teamRes.data || []).map(t => ({
@@ -70,6 +71,8 @@ async function loadData() {
   const thisWeek = getCurrentWeekStart();
   const lastWeek = getPreviousWeekStart();
 
+  const allGoals = goalsRes.data || [];
+
   CLIENTS = (clientRes.data || []).map(c => {
     const client = {
       id: c.id,
@@ -79,6 +82,7 @@ async function loadData() {
       weeklyChecklist: null,
       prevWeekChecklist: null,
       settings: allSettings.find(s => s.client_id === c.id) || null,
+      goals: allGoals.filter(g => g.client_id === c.id),
     };
     const clientWeeklies = allWeeklies.filter(w => w.client_id === c.id);
     client.weeklyChecklist = clientWeeklies.find(w => w.week_start === thisWeek) || null;
@@ -772,6 +776,93 @@ function renderClientDetail(root, clientId) {
   const weeklyChecklistBody = `<div id="weeklyChecklist-${client.id}">${lfSubSection}${sfSubSection}${wcSubSection}</div>`;
   const weeklyChecklistSection = isProduction ? collapsibleSection('weekly', 'Weekly Checklist', wcSummary, weeklyChecklistBody, { defaultOpen: true }) : '';
 
+  // ── Goals & KPIs section (collapsible) ──
+  const clientGoals = client.goals || [];
+  const activeGoals = clientGoals.filter(g => g.status === 'active');
+  const completedGoals = clientGoals.filter(g => g.status === 'completed');
+
+  const goalTypeEmoji = { kpi: '📊', milestone: '🎯', goal: '🏆', note: '📝' };
+  const goalTypeColors = { kpi: '#3b82f6', milestone: '#d4a843', goal: '#22c55e', note: '#a1a1aa' };
+
+  function renderGoalCard(g) {
+    const emoji = goalTypeEmoji[g.goal_type] || '📝';
+    const color = goalTypeColors[g.goal_type] || '#a1a1aa';
+    const hasProgress = g.target_value && g.current_value !== null && g.current_value !== undefined;
+    const pct = hasProgress ? Math.min(100, Math.round((parseFloat(g.current_value) / parseFloat(g.target_value)) * 100)) : null;
+    const dueStr = g.due_date ? new Date(g.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
+    const isOverdue = g.due_date && new Date(g.due_date) < new Date() && g.status === 'active';
+
+    return `
+      <div class="goal-card" data-goal-id="${g.id}">
+        <div class="goal-card-header">
+          <span class="goal-type-badge" style="background:${color}20;color:${color}">${emoji} ${g.goal_type.toUpperCase()}</span>
+          <div class="goal-actions">
+            ${g.status === 'active' ? `<button class="goal-complete-btn" data-goal-id="${g.id}" title="Mark complete">✓</button>` : ''}
+            <button class="goal-delete-btn" data-goal-id="${g.id}" title="Delete">×</button>
+          </div>
+        </div>
+        <div class="goal-title">${escHTML(g.title)}</div>
+        ${g.description ? `<div class="goal-desc">${escHTML(g.description)}</div>` : ''}
+        ${hasProgress ? `
+          <div class="goal-progress-wrap">
+            <div class="goal-progress-bar">
+              <div class="goal-progress-fill" style="width:${pct}%;background:${pct >= 100 ? 'var(--green,#22c55e)' : color}"></div>
+            </div>
+            <div class="goal-progress-label">
+              <span>${g.current_value} / ${g.target_value}</span>
+              <span>${pct}%</span>
+            </div>
+          </div>` : ''}
+        <div class="goal-meta">
+          ${dueStr ? `<span class="goal-due ${isOverdue ? 'overdue' : ''}">${isOverdue ? '⚠️ Overdue: ' : '📅 '}${dueStr}</span>` : ''}
+          ${g.status === 'completed' ? '<span class="goal-status-done">✓ Completed</span>' : ''}
+        </div>
+        ${g.status === 'active' && hasProgress ? `
+          <div class="goal-update-row">
+            <input type="number" class="goal-value-input" data-goal-id="${g.id}" placeholder="Update value..." value="" step="any" />
+            <button class="goal-update-btn" data-goal-id="${g.id}">Update</button>
+          </div>` : ''}
+      </div>`;
+  }
+
+  const goalsBody = `
+    <div class="goals-container">
+      <div class="goal-add-form" id="goalAddForm">
+        <div class="goal-form-row">
+          <select class="settings-input goal-type-select" id="goalType">
+            <option value="kpi">📊 KPI</option>
+            <option value="milestone">🎯 Milestone</option>
+            <option value="goal">🏆 Goal</option>
+            <option value="note">📝 Note</option>
+          </select>
+          <input class="settings-input goal-title-input" id="goalTitle" placeholder="Goal title..." />
+        </div>
+        <div class="goal-form-row">
+          <input class="settings-input" id="goalDesc" placeholder="Description (optional)" />
+        </div>
+        <div class="goal-form-row">
+          <input class="settings-input" id="goalTarget" type="number" placeholder="Target value" step="any" />
+          <input class="settings-input" id="goalCurrent" type="number" placeholder="Current value" step="any" />
+          <input class="settings-input" id="goalDue" type="date" />
+          <button class="btn-primary goal-add-btn" id="goalAddBtn">Add Goal</button>
+        </div>
+      </div>
+      ${activeGoals.length > 0 ? `
+        <div class="goals-list">
+          ${activeGoals.map(renderGoalCard).join('')}
+        </div>` : '<div class="empty-hint" style="margin-top:8px">No active goals — add one above</div>'}
+      ${completedGoals.length > 0 ? `
+        <div class="goals-completed-label">Completed (${completedGoals.length})</div>
+        <div class="goals-list goals-completed">
+          ${completedGoals.map(renderGoalCard).join('')}
+        </div>` : ''}
+    </div>`;
+
+  const goalsSummary = activeGoals.length > 0
+    ? `${activeGoals.length} active${completedGoals.length > 0 ? `, ${completedGoals.length} done` : ''}`
+    : 'No goals set';
+  const goalsSection = collapsibleSection('goals', 'Goals & KPIs', goalsSummary, goalsBody);
+
   // ── Settings section (collapsible) ──
   const settingsConfigured = sett.metricool_id || sett.slack_channel || sett.ghl_location_id;
   const settingsBody = `
@@ -878,6 +969,7 @@ function renderClientDetail(root, clientId) {
     ${teamSection}
     ${onboardingChecklistSection}
     ${weeklyChecklistSection}
+    ${goalsSection}
     ${settingsSection}
     ${activitySection}
   `;
@@ -1007,6 +1099,92 @@ function renderClientDetail(root, clientId) {
 
       await toggleChecklistStep(cid, stepKey, newDone, actor);
       renderClientDetail(root, cid);
+    });
+  });
+
+  // ── GOALS & KPIs ────────────────────────────────────────────
+  const goalAddBtn = root.querySelector("#goalAddBtn");
+  if (goalAddBtn) {
+    goalAddBtn.addEventListener("click", async () => {
+      const goalType = root.querySelector("#goalType").value;
+      const title = root.querySelector("#goalTitle").value.trim();
+      const description = root.querySelector("#goalDesc").value.trim() || null;
+      const targetValue = root.querySelector("#goalTarget").value || null;
+      const currentValue = root.querySelector("#goalCurrent").value || null;
+      const dueDate = root.querySelector("#goalDue").value || null;
+
+      if (!title) { root.querySelector("#goalTitle").focus(); return; }
+
+      const { error } = await sb.from('client_goals').insert({
+        client_id: clientId,
+        goal_type: goalType,
+        title,
+        description,
+        target_value: targetValue,
+        current_value: currentValue,
+        due_date: dueDate,
+        status: 'active',
+      });
+      if (error) { console.error('Goal insert error:', error); return; }
+
+      // Log activity
+      await sb.from('activity_log').insert({
+        client_id: clientId,
+        action: 'goal_added',
+        detail: `Goal added: ${title}`,
+        actor: localStorage.getItem('cc_actor') || 'PM',
+      });
+
+      // Reload goals and re-render
+      const { data: updatedGoals } = await sb.from('client_goals').select('*').eq('client_id', clientId).order('created_at', { ascending: false });
+      const cl = getClient(clientId);
+      if (cl) cl.goals = updatedGoals || [];
+      renderClientDetail(root, clientId);
+    });
+  }
+
+  // Goal complete buttons
+  root.querySelectorAll(".goal-complete-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const goalId = btn.dataset.goalId;
+      await sb.from('client_goals').update({ status: 'completed' }).eq('id', goalId);
+      const { data: updatedGoals } = await sb.from('client_goals').select('*').eq('client_id', clientId).order('created_at', { ascending: false });
+      const cl = getClient(clientId);
+      if (cl) cl.goals = updatedGoals || [];
+      renderClientDetail(root, clientId);
+    });
+  });
+
+  // Goal delete buttons
+  root.querySelectorAll(".goal-delete-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const goalId = btn.dataset.goalId;
+      if (btn.textContent === '?') {
+        await sb.from('client_goals').delete().eq('id', goalId);
+        const { data: updatedGoals } = await sb.from('client_goals').select('*').eq('client_id', clientId).order('created_at', { ascending: false });
+        const cl = getClient(clientId);
+        if (cl) cl.goals = updatedGoals || [];
+        renderClientDetail(root, clientId);
+      } else {
+        btn.textContent = '?';
+        btn.title = 'Click again to confirm';
+        setTimeout(() => { btn.textContent = '×'; btn.title = 'Delete'; }, 2000);
+      }
+    });
+  });
+
+  // Goal value update buttons
+  root.querySelectorAll(".goal-update-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const goalId = btn.dataset.goalId;
+      const input = root.querySelector(`.goal-value-input[data-goal-id="${goalId}"]`);
+      const newValue = input?.value;
+      if (!newValue && newValue !== '0') return;
+      await sb.from('client_goals').update({ current_value: parseFloat(newValue) }).eq('id', goalId);
+      const { data: updatedGoals } = await sb.from('client_goals').select('*').eq('client_id', clientId).order('created_at', { ascending: false });
+      const cl = getClient(clientId);
+      if (cl) cl.goals = updatedGoals || [];
+      renderClientDetail(root, clientId);
     });
   });
 
