@@ -1039,6 +1039,10 @@ function renderClientDetail(root, clientId) {
       <input class="settings-input" id="settMetricool" type="text" placeholder="brand-id" value="${escHTML(sett.metricool_id || '')}" />
     </div>
     <div class="settings-row">
+      <span class="settings-label">Metricool Blog ID</span>
+      <input class="settings-input" id="settMetricoolBlogId" type="text" placeholder="e.g. 4794381 (from Metricool URL)" value="${escHTML(sett.metricool_blog_id || '')}" />
+    </div>
+    <div class="settings-row">
       <span class="settings-label">Slack Channel</span>
       <input class="settings-input" id="settSlack" type="text" placeholder="#client-cc-internal" value="${escHTML(sett.slack_channel || '')}" />
     </div>
@@ -1367,11 +1371,13 @@ function renderClientDetail(root, clientId) {
       const ghlToken = root.querySelector("#settGhlToken").value.trim();
 
       // Save settings to Supabase (token is NOT stored in Supabase)
+      const metricoolBlogId = root.querySelector("#settMetricoolBlogId").value.trim();
       await saveClientSettings(clientId, {
         videos_per_week:     parseInt(root.querySelector("#settVpw").value) || 0,
         shorts_per_week:     parseInt(root.querySelector("#settSpw").value) || 0,
         written_per_week:    parseInt(root.querySelector("#settWpw").value) || 0,
         metricool_id:        root.querySelector("#settMetricool").value.trim(),
+        metricool_blog_id:   metricoolBlogId,
         slack_channel:       root.querySelector("#settSlack").value.trim(),
         ghl_location_id:     ghlLocationId,
         lead_value_dollars:  parseFloat(root.querySelector("#settLeadValue").value) || 0,
@@ -1401,6 +1407,19 @@ function renderClientDetail(root, clientId) {
           console.error("GHL token save error:", err);
           const statusEl = root.querySelector("#ghlStatus");
           if (statusEl) { statusEl.textContent = "Token save failed — check console"; statusEl.style.color = "#ef4444"; }
+        }
+      }
+
+      // Auto-sync Metricool Blog ID to client_metricool table
+      if (metricoolBlogId) {
+        try {
+          await sb.from('client_metricool').upsert({
+            client_id: clientId,
+            blog_id: metricoolBlogId,
+            platforms: ["youtube"],
+          }, { onConflict: 'client_id' });
+        } catch (err) {
+          console.error("Metricool blog ID sync error:", err);
         }
       }
 
