@@ -49,7 +49,7 @@ async function loadData() {
     return;
   }
 
-  const [teamRes, clientRes, assignRes, checkRes, weeklyRes, settingsRes, activityRes, goalsRes, analyticsRes, trendsRes] = await Promise.all([
+  const [teamRes, clientRes, assignRes, checkRes, weeklyRes, settingsRes, activityRes, goalsRes] = await Promise.all([
     sb.from('team_members').select('*').order('id'),
     sb.from('clients').select('*').order('id'),
     sb.from('client_team').select('*'),
@@ -58,8 +58,6 @@ async function loadData() {
     sb.from('client_settings').select('*'),
     sb.from('activity_log').select('*').order('created_at', { ascending: false }).limit(200),
     sb.from('client_goals').select('*').order('created_at', { ascending: false }),
-    sb.from('client_analytics').select('*').order('snapshot_date', { ascending: false }).limit(100),
-    sb.from('client_analytics_trends').select('*').order('period_start', { ascending: false }).limit(50),
   ]);
 
   TEAM = (teamRes.data || []).map(t => ({
@@ -85,8 +83,6 @@ async function loadData() {
       prevWeekChecklist: null,
       settings: allSettings.find(s => s.client_id === c.id) || null,
       goals: allGoals.filter(g => g.client_id === c.id),
-      analytics: (analyticsRes.data || []).filter(a => a.client_id === c.id),
-      analyticsTrends: (trendsRes.data || []).filter(t => t.client_id === c.id),
     };
     const clientWeeklies = allWeeklies.filter(w => w.client_id === c.id);
     client.weeklyChecklist = clientWeeklies.find(w => w.week_start === thisWeek) || null;
@@ -679,108 +675,6 @@ function productionCardHTML(c) {
     </div>`;
 }
 
-/* ── ANALYTICS SECTION ──────────────────────────────────────────── */
-function renderAnalyticsSection(client) {
-  const analytics = client.analytics || [];
-  const trends = client.analyticsTrends || [];
-
-  if (analytics.length === 0 && trends.length === 0) {
-    return collapsibleSection('analytics', '📊 Performance Analytics', 'No data',
-      '<div class="empty-hint">No analytics data yet. Connect this client\'s Metricool account in Settings.</div>');
-  }
-
-  // Latest snapshot for stat cards
-  const latest = analytics[0] || {};
-  const previous = analytics[1] || {};
-
-  function formatNum(n) {
-    if (n == null) return '—';
-    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-    return String(n);
-  }
-
-  function deltaHTML(current, prev) {
-    if (current == null || prev == null) return '';
-    const diff = current - prev;
-    if (diff === 0) return '<div class="analytics-delta" style="color:var(--muted)">—</div>';
-    const sign = diff > 0 ? '▲' : '▼';
-    const cls = diff > 0 ? 'positive' : 'negative';
-    const pct = prev !== 0 ? Math.abs(Math.round((diff / prev) * 100)) : 0;
-    return `<div class="analytics-delta ${cls}">${sign} ${pct}%</div>`;
-  }
-
-  // Stat cards
-  const statCards = `
-    <div class="analytics-grid">
-      <div class="analytics-stat-card">
-        <div class="analytics-stat-value">${formatNum(latest.views_7d)}</div>
-        <div class="analytics-stat-label">7-Day Views</div>
-        ${deltaHTML(latest.views_7d, previous.views_7d)}
-      </div>
-      <div class="analytics-stat-card">
-        <div class="analytics-stat-value">${formatNum(latest.subscribers)}</div>
-        <div class="analytics-stat-label">Subscribers</div>
-        ${deltaHTML(latest.subscribers, previous.subscribers)}
-      </div>
-      <div class="analytics-stat-card">
-        <div class="analytics-stat-value">${formatNum(latest.likes_7d)}</div>
-        <div class="analytics-stat-label">7-Day Likes</div>
-        ${deltaHTML(latest.likes_7d, previous.likes_7d)}
-      </div>
-      <div class="analytics-stat-card">
-        <div class="analytics-stat-value">${latest.engagement_rate != null ? latest.engagement_rate.toFixed(1) + '%' : '—'}</div>
-        <div class="analytics-stat-label">Engagement Rate</div>
-        ${deltaHTML(latest.engagement_rate, previous.engagement_rate)}
-      </div>
-    </div>`;
-
-  // Daily views bar chart (last 7 days from analytics snapshots)
-  const dailyData = analytics.slice(0, 7).reverse();
-  const maxViews = Math.max(...dailyData.map(d => d.views_daily || 0), 1);
-  const barChart = dailyData.length > 1 ? `
-    <div style="font-size:11px;color:var(--muted);margin-bottom:4px;font-weight:600">DAILY VIEWS (LAST 7 DAYS)</div>
-    <div class="analytics-chart">
-      ${dailyData.map(d => {
-        const h = Math.max(4, Math.round(((d.views_daily || 0) / maxViews) * 72));
-        const dayLabel = d.snapshot_date ? new Date(d.snapshot_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' }) : '';
-        return `<div class="analytics-bar" style="height:${h}px" title="${formatNum(d.views_daily)} views">
-          <span class="analytics-bar-label">${dayLabel}</span>
-        </div>`;
-      }).join('')}
-    </div>` : '';
-
-  // Top 3 performing content
-  const topContent = (latest.top_content || []).slice(0, 3);
-  const topContentHTML = topContent.length > 0 ? `
-    <div style="font-size:11px;color:var(--muted);margin-bottom:8px;font-weight:600;margin-top:16px">TOP PERFORMING CONTENT</div>
-    ${topContent.map((item, i) => `
-      <div class="analytics-top-item">
-        <span class="analytics-top-title">${i + 1}. ${escHTML(item.title || 'Untitled')}</span>
-        <span class="analytics-top-stats">${formatNum(item.views)} views · ${formatNum(item.likes)} likes</span>
-      </div>`).join('')}` : '';
-
-  // Week-over-week trends (last 4 weeks)
-  const recentTrends = trends.slice(0, 4);
-  const trendsHTML = recentTrends.length > 0 ? `
-    <div style="font-size:11px;color:var(--muted);margin-bottom:8px;font-weight:600;margin-top:16px">WEEK-OVER-WEEK TREND</div>
-    <div class="analytics-trends">
-      ${recentTrends.map(t => {
-        const weekLabel = t.period_start ? new Date(t.period_start + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
-        const delta = t.views_change_pct != null ? (t.views_change_pct >= 0 ? '▲' : '▼') + ' ' + Math.abs(t.views_change_pct).toFixed(0) + '%' : '';
-        const deltaColor = t.views_change_pct >= 0 ? 'var(--green)' : 'var(--red)';
-        return `<div class="analytics-trend-pill">
-          ${weekLabel} · ${formatNum(t.views)} views
-          ${delta ? `<span style="color:${deltaColor};font-weight:600;margin-left:4px">${delta}</span>` : ''}
-        </div>`;
-      }).join('')}
-    </div>` : '';
-
-  const body = `${statCards}${barChart}${topContentHTML}${trendsHTML}`;
-  const summary = latest.views_7d != null ? `${formatNum(latest.views_7d)} views this week` : 'Data available';
-  return collapsibleSection('analytics', '📊 Performance Analytics', summary, body);
-}
-
 /* ── CLIENT DETAIL VIEW ─────────────────────────────────────────── */
 function renderClientDetail(root, clientId) {
   const client = getClient(clientId);
@@ -1015,9 +909,6 @@ function renderClientDetail(root, clientId) {
     : 'No goals set';
   const goalsSection = collapsibleSection('goals', 'Goals & KPIs', goalsSummary, goalsBody);
 
-  // ── Analytics section (collapsible) ──
-  const analyticsSection = renderAnalyticsSection(client);
-
   // ── Settings section (collapsible) ──
   const settingsConfigured = sett.metricool_id || sett.slack_channel || sett.ghl_location_id;
   const settingsBody = `
@@ -1132,7 +1023,6 @@ function renderClientDetail(root, clientId) {
     ${onboardingChecklistSection}
     ${weeklyChecklistSection}
     ${goalsSection}
-    ${analyticsSection}
     ${settingsSection}
     ${activitySection}
   `;
