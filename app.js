@@ -724,7 +724,7 @@ function renderClientDetail(root, clientId) {
     { url: sett.written_content_url,   label: '✏️ Written Content' },
     { url: sett.ai_url,                label: '🤖 AI' },
     { url: sett.social_dashboard_url,  label: '📱 Social Dashboard' },
-    { url: sett.dna_doc_url,           label: '🧬 Client DNA' },
+    { url: `https://qc.contentcartel.net/dna`,  label: '🧬 DNA / Client Prompt' },
   ].filter(l => l.url && l.url.trim());
   const allLinkCount = clientLinks.length + (hasAnalytics ? 1 : 0);
   const hasAnyLinks = allLinkCount > 0;
