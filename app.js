@@ -36,6 +36,12 @@ const WRITTEN_STEPS = [
 ];
 const ALL_STEPS = [...CHECKLIST_STEPS, ...SF_STEPS, ...WRITTEN_STEPS];
 
+const FUNNEL_STEPS = [
+  { key: 'funnel_lead_magnet',    label: 'Lead Magnet Live' },
+  { key: 'funnel_vsl_routing',    label: 'VSL Routing Active' },
+  { key: 'funnel_dm_automation',  label: 'DM Automation Firing' },
+];
+
 /* ── GLOBAL STATE ────────────────────────────────────────────────── */
 let TEAM = [];
 let CLIENTS = [];
@@ -437,6 +443,25 @@ function checklistProgressHTML(client) {
   return `<span class="volume-counter behind">${label}</span>`;
 }
 
+function postedProgressHTML(client) {
+  const sett = client.settings || {};
+  const wc = client.weeklyChecklist;
+  const vpw = sett.videos_per_week || 0;
+  const spw = sett.shorts_per_week || 0;
+  const wpw = sett.written_per_week || 0;
+  if (vpw === 0 && spw === 0 && wpw === 0) return '';
+
+  const lfP = wc ? (wc.lf_posted || 0) : 0;
+  const sfP = wc ? (wc.sf_posted || 0) : 0;
+  const wcP = wc ? (wc.wc_posted || 0) : 0;
+
+  let pills = [];
+  if (vpw > 0) pills.push(`<span class="card-posted-pill ${lfP >= vpw ? 'done' : ''}">${lfP}/${vpw} LF</span>`);
+  if (spw > 0) pills.push(`<span class="card-posted-pill ${sfP >= spw ? 'done' : ''}">${sfP}/${spw} SF</span>`);
+  if (wpw > 0) pills.push(`<span class="card-posted-pill ${wcP >= wpw ? 'done' : ''}">${wcP}/${wpw} WC</span>`);
+  return `<div class="card-posted-row">${pills.join('')}</div>`;
+}
+
 function timeAgo(dateStr) {
   if (!dateStr) return '';
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -667,10 +692,7 @@ function productionCardHTML(c) {
     <div class="client-card" data-id="${c.id}">
       <div class="card-name">${c.name}</div>
       ${specialHTML}
-      <div class="card-deliverables">
-        ${checklistProgressHTML(c)}
-        ${prevHTML}
-      </div>
+      ${postedProgressHTML(c)}
       ${avatarsHTML ? `<div class="card-footer">${avatarsHTML}</div>` : ''}
     </div>`;
 }
@@ -806,21 +828,32 @@ function renderClientDetail(root, clientId) {
     }).join("");
   }
 
-  // Build summary parts for weekly checklist header
-  let wcSummaryParts = [`${lfProg.done}/${lfProg.total} LF`];
-  if (hasSf) wcSummaryParts.push(`${sfProg.done}/${sfProg.total} SF`);
-  if (hasWc) wcSummaryParts.push(`${wcProg.done}/${wcProg.total} WC`);
-  const wcSummary = wcSummaryParts.join(' · ') +
-    (prevWc ? ` | Last wk: ${prevCombinedProg.done === prevCombinedProg.total ? '✅' : prevCombinedProg.done + '/' + prevCombinedProg.total}` : '') +
-    (combinedProg.done === combinedProg.total && combinedProg.total > 0 ? ' <span class="week-complete-badge">Complete</span>' : '');
+  // ── Posted counter pills (goal-based: X/Y posted this week) ──
+  const vpw = (client.settings && client.settings.videos_per_week) || 0;
+  const spw = (client.settings && client.settings.shorts_per_week) || 0;
+  const wpw = (client.settings && client.settings.written_per_week) || 0;
+  const lfPosted = wc ? (wc.lf_posted || 0) : 0;
+  const sfPosted = wc ? (wc.sf_posted || 0) : 0;
+  const wcPosted = wc ? (wc.wc_posted || 0) : 0;
 
-  // Build nested sub-sections
-  const lfSubSection = collapsibleSub('lf-' + clientId, 'Long Form', `${lfProg.done}/${lfProg.total}`, renderStepRows(CHECKLIST_STEPS, 0));
-  const sfSubSection = hasSf ? collapsibleSub('sf-' + clientId, 'Short Form', `${sfProg.done}/${sfProg.total}`, renderStepRows(SF_STEPS, CHECKLIST_STEPS.length)) : '';
-  const wcSubSection = hasWc ? collapsibleSub('wc-' + clientId, 'Written Content', `${wcProg.done}/${wcProg.total}`, renderStepRows(WRITTEN_STEPS, CHECKLIST_STEPS.length + SF_STEPS.length)) : '';
+  const allPosted = (vpw > 0 ? lfPosted >= vpw : true) && (spw > 0 ? sfPosted >= spw : true) && (wpw > 0 ? wcPosted >= wpw : true);
+  let postedSummaryParts = [];
+  if (vpw > 0) postedSummaryParts.push(`${lfPosted}/${vpw} LF`);
+  if (spw > 0) postedSummaryParts.push(`${sfPosted}/${spw} SF`);
+  if (wpw > 0) postedSummaryParts.push(`${wcPosted}/${wpw} WC`);
+  const postedSummary = postedSummaryParts.length > 0
+    ? postedSummaryParts.join(' · ') + (allPosted && postedSummaryParts.length > 0 ? ' <span class="week-complete-badge">Complete</span>' : '')
+    : 'No targets set';
 
-  const weeklyChecklistBody = `<div id="weeklyChecklist-${client.id}">${lfSubSection}${sfSubSection}${wcSubSection}</div>`;
-  const weeklyChecklistSection = isProduction ? collapsibleSection('weekly', 'Weekly Checklist', wcSummary, weeklyChecklistBody, { defaultOpen: true }) : '';
+  const postedPills = (vpw > 0 || spw > 0 || wpw > 0) ? `
+    <div class="posted-counters" data-client="${client.id}">
+      ${vpw > 0 ? `<button class="posted-pill ${lfPosted >= vpw ? 'complete' : ''}" data-type="lf_posted" data-max="${vpw}" data-current="${lfPosted}">${lfPosted}/${vpw} LF posted</button>` : ''}
+      ${spw > 0 ? `<button class="posted-pill ${sfPosted >= spw ? 'complete' : ''}" data-type="sf_posted" data-max="${spw}" data-current="${sfPosted}">${sfPosted}/${spw} SF posted</button>` : ''}
+      ${wpw > 0 ? `<button class="posted-pill ${wcPosted >= wpw ? 'complete' : ''}" data-type="wc_posted" data-max="${wpw}" data-current="${wcPosted}">${wcPosted}/${wpw} written</button>` : ''}
+    </div>` : '';
+
+  const weeklyChecklistBody = `<div id="weeklyChecklist-${client.id}">${postedPills}</div>`;
+  const weeklyChecklistSection = isProduction ? collapsibleSection('weekly', 'Weekly Checklist', postedSummary, weeklyChecklistBody, { defaultOpen: true }) : '';
 
   // ── Goals & KPIs section (collapsible) ──
   const clientGoals = client.goals || [];
@@ -1009,6 +1042,28 @@ function renderClientDetail(root, clientId) {
     </div>`).join("");
   const activitySection = collapsibleSection('activity', 'Recent Activity', `${clientActivity.length} event${clientActivity.length !== 1 ? 's' : ''}`, activityBody);
 
+  // ── Funnel Status section (collapsible) ──
+  const funnelActive = FUNNEL_STEPS.filter(f => wc && wc[f.key]).length;
+  const funnelTotal = FUNNEL_STEPS.length;
+  const funnelSummary = isProduction
+    ? (funnelActive === funnelTotal ? 'All active' : `${funnelActive}/${funnelTotal} active`)
+    : '';
+  const funnelBody = `
+    <div class="funnel-toggles" data-client="${client.id}">
+      ${FUNNEL_STEPS.map(f => {
+        const isOn = wc ? wc[f.key] : false;
+        return `
+        <div class="funnel-toggle-row">
+          <button class="funnel-toggle ${isOn ? 'active' : ''}" data-step="${f.key}">
+            <span class="funnel-toggle-indicator">${isOn ? '✓' : ''}</span>
+          </button>
+          <span class="funnel-toggle-label">${f.label}</span>
+          <span class="funnel-toggle-status ${isOn ? 'on' : 'off'}">${isOn ? 'Active' : 'Inactive'}</span>
+        </div>`;
+      }).join('')}
+    </div>`;
+  const funnelSection = isProduction ? collapsibleSection('funnel', 'Funnel', funnelSummary, funnelBody) : '';
+
   root.innerHTML = `
     <div class="detail-header">
       <div class="detail-name">${client.name}</div>
@@ -1022,6 +1077,7 @@ function renderClientDetail(root, clientId) {
     ${teamSection}
     ${onboardingChecklistSection}
     ${weeklyChecklistSection}
+    ${funnelSection}
     ${goalsSection}
     ${settingsSection}
     ${activitySection}
@@ -1163,6 +1219,55 @@ function renderClientDetail(root, clientId) {
       }
 
       await toggleChecklistStep(cid, stepKey, newDone, actor);
+      renderClientDetail(root, cid);
+    });
+  });
+
+  // ── POSTED COUNTER PILLS ─────────────────────────────────────
+  root.querySelectorAll(".posted-pill").forEach(pill => {
+    pill.addEventListener("click", async () => {
+      const container = pill.closest(".posted-counters");
+      const cid = parseInt(container.dataset.client);
+      const cl = getClient(cid);
+      if (!cl) return;
+
+      const type = pill.dataset.type; // lf_posted, sf_posted, wc_posted
+      const max = parseInt(pill.dataset.max);
+      const current = parseInt(pill.dataset.current);
+      const newVal = current >= max ? 0 : current + 1;
+
+      const checklist = await ensureWeeklyChecklist(cid);
+      if (!checklist) return;
+
+      await sb.from('weekly_checklist').update({ [type]: newVal }).eq('id', checklist.id);
+      checklist[type] = newVal;
+
+      const labels = { lf_posted: 'Long Form', sf_posted: 'Short Form', wc_posted: 'Written' };
+      logActivity(cid, 'posted_updated', `${labels[type]} posted: ${newVal}/${max} for "${cl.name}"`);
+
+      renderClientDetail(root, cid);
+    });
+  });
+
+  // ── FUNNEL TOGGLES ──────────────────────────────────────────
+  root.querySelectorAll(".funnel-toggle").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const container = btn.closest(".funnel-toggles");
+      const cid = parseInt(container.dataset.client);
+      const cl = getClient(cid);
+      if (!cl) return;
+
+      const stepKey = btn.dataset.step;
+      const checklist = await ensureWeeklyChecklist(cid);
+      if (!checklist) return;
+
+      const newVal = !checklist[stepKey];
+      await sb.from('weekly_checklist').update({ [stepKey]: newVal }).eq('id', checklist.id);
+      checklist[stepKey] = newVal;
+
+      const stepLabel = FUNNEL_STEPS.find(f => f.key === stepKey)?.label || stepKey;
+      logActivity(cid, 'funnel_toggled', `${stepLabel}: ${newVal ? 'Active' : 'Inactive'} for "${cl.name}"`);
+
       renderClientDetail(root, cid);
     });
   });
