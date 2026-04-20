@@ -116,8 +116,12 @@ async function saveNewClient(name) {
 
 async function deleteClientDB(clientId) {
   const cl = getClient(clientId);
-  await sb.from('clients').delete().eq('id', clientId);
-  if (cl) logActivity(null, 'client_deleted', `"${cl.name}" removed`);
+  const { error } = await sb.from('clients').delete().eq('id', clientId);
+  if (error) {
+    alert(`Delete failed: ${error.message}\n\nIf this client is in production, run supabase-migration-8-client-cascade.sql in Supabase.`);
+    throw error;
+  }
+  if (cl) await logActivity(null, 'client_deleted', `"${cl.name}" removed`);
 }
 
 async function cloneClientDB(sourceClientId, newName) {
@@ -1088,20 +1092,45 @@ function renderClientDetail(root, clientId) {
 
   // ── BIND EVENTS ─────────────────────────────────────────────
 
-  // Delete client
+  // Delete client — two-click arm, then typed-name code gate before actual delete.
   const deleteBtn = root.querySelector("#deleteClientBtn");
   if (deleteBtn) {
+    const isProd = client.phase === 'production' || client.phase === 'special';
+    const confirmLabel = isProd ? "Wipe all data?" : "Confirm?";
     deleteBtn.addEventListener("click", () => {
-      deleteBtn.textContent = "Confirm?";
+      deleteBtn.textContent = confirmLabel;
       deleteBtn.classList.add("confirm");
       deleteBtn.addEventListener("click", async () => {
-        await deleteClientDB(clientId);
+        const typed = prompt(
+          `Enter deletion code to confirm removing "${client.name}".\n\nThis cannot be undone.`
+        );
+        if (typed === null) {
+          deleteBtn.textContent = "Remove";
+          deleteBtn.classList.remove("confirm");
+          return;
+        }
+        if (typed.trim() !== "0012") {
+          alert("Incorrect code. Deletion cancelled.");
+          deleteBtn.textContent = "Remove";
+          deleteBtn.classList.remove("confirm");
+          return;
+        }
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = "Removing…";
+        try {
+          await deleteClientDB(clientId);
+        } catch (e) {
+          deleteBtn.disabled = false;
+          deleteBtn.textContent = "Remove";
+          deleteBtn.classList.remove("confirm");
+          return;
+        }
         const idx = CLIENTS.findIndex(c => c.id === clientId);
         if (idx !== -1) CLIENTS.splice(idx, 1);
         navigate("/");
       }, { once: true });
       setTimeout(() => {
-        if (deleteBtn && !deleteBtn.classList.contains("gone")) {
+        if (deleteBtn && !deleteBtn.classList.contains("gone") && !deleteBtn.disabled) {
           deleteBtn.textContent = "Remove";
           deleteBtn.classList.remove("confirm");
         }
