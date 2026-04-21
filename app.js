@@ -695,6 +695,7 @@ function mountToolsDropdown() {
       <div class="tools-section">
         <div class="tools-label">Global</div>
         <a class="tools-link" href="https://qc.contentcartel.net/dna" target="_blank" rel="noopener">QC Tool ↗</a>
+        <a class="tools-link" href="https://tracking.contentcartel.net" target="_blank" rel="noopener">Attribution Tracker ↗</a>
         <a class="tools-link" href="https://analytics.contentcartel.net/" target="_blank" rel="noopener">Analytics ↗</a>
         <a class="tools-link" href="https://content-cartel-1.app.n8n.cloud" target="_blank" rel="noopener">n8n ↗</a>
         <a class="tools-link" href="#/company" data-internal>Company Links</a>
