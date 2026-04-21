@@ -55,7 +55,7 @@ async function loadData() {
     return;
   }
 
-  const [teamRes, clientRes, assignRes, checkRes, weeklyRes, settingsRes, activityRes, goalsRes] = await Promise.all([
+  const [teamRes, clientRes, assignRes, checkRes, weeklyRes, settingsRes, activityRes, goalsRes, calRes, tasksRes] = await Promise.all([
     sb.from('team_members').select('*').order('id'),
     sb.from('clients').select('*').order('id'),
     sb.from('client_team').select('*'),
@@ -64,6 +64,8 @@ async function loadData() {
     sb.from('client_settings').select('*'),
     sb.from('activity_log').select('*').order('created_at', { ascending: false }).limit(200),
     sb.from('client_goals').select('*').order('created_at', { ascending: false }),
+    sb.from('client_calendar_entries').select('*').order('publish_date', { ascending: true, nullsFirst: false }),
+    sb.from('client_tasks').select('*').order('created_at', { ascending: false }),
   ]);
 
   TEAM = (teamRes.data || []).map(t => ({
@@ -78,6 +80,8 @@ async function loadData() {
   const lastWeek = getPreviousWeekStart();
 
   const allGoals = goalsRes.data || [];
+  const allCalendarEntries = calRes.data || [];
+  const allTasks = tasksRes.data || [];
 
   CLIENTS = (clientRes.data || []).map(c => {
     const client = {
@@ -89,6 +93,8 @@ async function loadData() {
       prevWeekChecklist: null,
       settings: allSettings.find(s => s.client_id === c.id) || null,
       goals: allGoals.filter(g => g.client_id === c.id),
+      calendarEntries: allCalendarEntries.filter(e => e.client_id === c.id),
+      tasks: allTasks.filter(t => t.client_id === c.id),
     };
     const clientWeeklies = allWeeklies.filter(w => w.client_id === c.id);
     client.weeklyChecklist = clientWeeklies.find(w => w.week_start === thisWeek) || null;
@@ -310,7 +316,7 @@ async function toggleChecklistStep(clientId, stepKey, done, actor) {
         slack_channel: cl?.settings?.slack_channel || '',
         week_start: checklist.week_start,
       });
-      logActivity(clientId, 'week_complete', `All weekly steps completed for "${cl?.name || '?'}" 🎉`, actor);
+      logActivity(clientId, 'week_complete', `All weekly steps completed for "${cl?.name || '?'}"`, actor);
     }
   }
 }
@@ -480,6 +486,75 @@ function timeAgo(dateStr) {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+/* ── CLIENT LINKS HELPER ──────────────────────────────────────────
+   Single source of truth for the per-client tool links shown both on the
+   client detail page (Quick Links) and in the topbar Tools dropdown. */
+function buildClientLinks(client) {
+  const sett = (client && client.settings) || {};
+  const links = [
+    { url: sett.gdrive_url,           label: 'Google Drive' },
+    { url: sett.sf_scripts_url,       label: 'SF Scripts' },
+    { url: sett.lf_scripts_url,       label: 'LF Scripts' },
+    { url: sett.main_links_url,       label: 'Main Links' },
+    { url: sett.kpis_url,             label: 'KPIs' },
+    { url: sett.growth_ops_url,       label: 'Growth Ops' },
+    { url: sett.written_content_url,  label: 'Written Content' },
+    { url: sett.ai_url,               label: 'AI' },
+    { url: sett.social_dashboard_url, label: 'Social Dashboard' },
+    { url: sett.dna_doc_url,          label: 'Client DNA Doc' },
+    { url: 'https://qc.contentcartel.net/dna', label: 'DNA / Client Prompt' },
+  ].filter(l => l.url && l.url.trim());
+  const analytics = sett.metricool_id && sett.metricool_id.trim()
+    ? { url: ANALYTICS_BASE + sett.metricool_id.trim(), label: 'Analytics' }
+    : null;
+  return { analytics, links };
+}
+
+/* ── MODAL HELPER ─────────────────────────────────────────────────
+   Minimal overlay modal. onSave receives the body element and may return
+   `false` to keep the modal open (validation failure). */
+function openModal({ title, bodyHTML, onSave, saveLabel }) {
+  saveLabel = saveLabel || 'Save';
+  const overlay = document.createElement('div');
+  overlay.className = 'cc-modal-overlay';
+  overlay.innerHTML = `
+    <div class="cc-modal" role="dialog" aria-modal="true">
+      <div class="cc-modal-header">
+        <div class="cc-modal-title">${escHTML(title)}</div>
+        <button class="cc-modal-close" type="button" aria-label="Close">×</button>
+      </div>
+      <div class="cc-modal-body">${bodyHTML}</div>
+      <div class="cc-modal-footer">
+        <button class="btn-cancel cc-modal-cancel" type="button">Cancel</button>
+        <button class="btn-primary cc-modal-save" type="button">${escHTML(saveLabel)}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  function close() { overlay.remove(); document.removeEventListener('keydown', onKey); }
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('.cc-modal-close').addEventListener('click', close);
+  overlay.querySelector('.cc-modal-cancel').addEventListener('click', close);
+  overlay.querySelector('.cc-modal-save').addEventListener('click', async () => {
+    const saveBtn = overlay.querySelector('.cc-modal-save');
+    saveBtn.disabled = true;
+    try {
+      const result = await onSave(overlay.querySelector('.cc-modal-body'));
+      if (result === false) saveBtn.disabled = false;
+      else close();
+    } catch (e) {
+      saveBtn.disabled = false;
+      console.error('Modal save error:', e);
+    }
+  });
+  // Auto-focus first input
+  const firstInput = overlay.querySelector('input, textarea, select');
+  if (firstInput) firstInput.focus();
+  return { close, overlay };
+}
+window.openModal = openModal;
+
 /* ── DASHBOARD PASSWORD GATE ────────────────────────────────────── */
 const COMPANY_PASSWORD = 'cc2025';
 const DASHBOARD_PASSWORD = 'ccpm2025';
@@ -526,6 +601,10 @@ function renderDashboardGate() {
 function getRoute() {
   const hash = location.hash || "#/";
   const path = hash.slice(1) || "/";
+  const calMatch = path.match(/^\/client\/(\d+)\/calendar$/);
+  if (calMatch) {
+    return { view: "clientCalendar", id: parseInt(calMatch[1]) };
+  }
   if (path.startsWith("/client/")) {
     return { view: "client", id: parseInt(path.split("/client/")[1]) };
   }
@@ -549,10 +628,26 @@ function render() {
   root.style.animation = "";
 
   const backLink = document.getElementById("backLink");
-  if (backLink) backLink.classList.toggle("visible", route.view === "client" || route.view === "company" || route.view === "team");
+  if (backLink) {
+    const showBack = route.view === "client" || route.view === "clientCalendar" || route.view === "company" || route.view === "team";
+    backLink.classList.toggle("visible", showBack);
+    if (route.view === "clientCalendar") {
+      backLink.setAttribute("href", `#/client/${route.id}`);
+      backLink.textContent = "← Back to client";
+    } else {
+      backLink.setAttribute("href", "#/");
+      backLink.textContent = "← All Clients";
+    }
+  }
 
   if (route.view === "client") {
     renderClientDetail(root, route.id);
+  } else if (route.view === "clientCalendar") {
+    if (typeof window.renderClientCalendar === "function") {
+      window.renderClientCalendar(root, route.id);
+    } else {
+      root.innerHTML = `<div class="empty-state">Calendar module not loaded.</div>`;
+    }
   } else if (route.view === "company") {
     renderCompanyLinks(root);
   } else if (route.view === "team") {
@@ -575,6 +670,110 @@ function render() {
 
 window.addEventListener("hashchange", render);
 document.addEventListener("DOMContentLoaded", loadData);
+document.addEventListener("DOMContentLoaded", mountToolsDropdown);
+
+/* ── TOOLS DROPDOWN ───────────────────────────────────────────────
+   Topbar entry point for global + per-client tools. Trigger lives in
+   index.html; this function wires the click handler and renders the
+   panel content from current CLIENTS at open time. */
+function mountToolsDropdown() {
+  const trigger = document.getElementById('toolsBtn');
+  const panel   = document.getElementById('toolsDropdown');
+  if (!trigger || !panel) return;
+
+  const close = () => {
+    panel.hidden = true;
+    trigger.classList.remove('open');
+    document.removeEventListener('click', onDocClick);
+  };
+  const onDocClick = (e) => {
+    if (!panel.contains(e.target) && e.target !== trigger) close();
+  };
+
+  function renderPanel() {
+    panel.innerHTML = `
+      <div class="tools-section">
+        <div class="tools-label">Global</div>
+        <a class="tools-link" href="https://qc.contentcartel.net/dna" target="_blank" rel="noopener">QC Tool ↗</a>
+        <a class="tools-link" href="https://analytics.contentcartel.net/" target="_blank" rel="noopener">Analytics ↗</a>
+        <a class="tools-link" href="https://content-cartel-1.app.n8n.cloud" target="_blank" rel="noopener">n8n ↗</a>
+        <a class="tools-link" href="#/company" data-internal>Company Links</a>
+        <a class="tools-link" href="#/team" data-internal>Team</a>
+      </div>
+      <div class="tools-section tools-section-client">
+        <div class="tools-label">Per-client</div>
+        <input type="search" id="toolsClientPicker" class="tools-search" placeholder="Pick a client..." autocomplete="off" />
+        <div class="tools-client-results" id="toolsClientResults"></div>
+        <div class="tools-client-links" id="toolsClientLinks" hidden></div>
+      </div>`;
+
+    // Internal links should also close the panel
+    panel.querySelectorAll('[data-internal]').forEach(a => {
+      a.addEventListener('click', () => close());
+    });
+
+    const search   = panel.querySelector('#toolsClientPicker');
+    const results  = panel.querySelector('#toolsClientResults');
+    const linksBox = panel.querySelector('#toolsClientLinks');
+
+    function renderResults(filter) {
+      const f = (filter || '').trim().toLowerCase();
+      const matches = (CLIENTS || [])
+        .filter(c => !f || c.name.toLowerCase().includes(f))
+        .slice(0, 12);
+      results.innerHTML = matches.length === 0
+        ? '<div class="tools-empty">No clients match</div>'
+        : matches.map(c => `<button class="tools-client-row" data-id="${c.id}">${escHTML(c.name)}</button>`).join('');
+      results.querySelectorAll('.tools-client-row').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const cid = parseInt(btn.dataset.id);
+          showClientLinks(cid);
+        });
+      });
+    }
+
+    function showClientLinks(clientId) {
+      const cl = getClient(clientId);
+      if (!cl) return;
+      const { analytics, links } = buildClientLinks(cl);
+      const all = (analytics ? [analytics] : []).concat(links);
+      results.hidden = true;
+      linksBox.hidden = false;
+      linksBox.innerHTML = `
+        <div class="tools-client-header">
+          <button class="tools-back" type="button">← clients</button>
+          <span class="tools-client-name">${escHTML(cl.name)}</span>
+          <a class="tools-link tools-link-pin" href="#/client/${cl.id}" data-internal>open page →</a>
+        </div>
+        ${all.length === 0
+          ? '<div class="tools-empty">No links configured for this client</div>'
+          : all.map(l => `<a class="tools-link" href="${l.url}" target="_blank" rel="noopener">${l.label} ↗</a>`).join('')}`;
+      linksBox.querySelector('.tools-back').addEventListener('click', () => {
+        linksBox.hidden = true;
+        results.hidden = false;
+        search.focus();
+      });
+      linksBox.querySelectorAll('[data-internal]').forEach(a => {
+        a.addEventListener('click', () => close());
+      });
+    }
+
+    search.addEventListener('input', () => { results.hidden = false; linksBox.hidden = true; renderResults(search.value); });
+    renderResults('');
+  }
+
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const wasOpen = !panel.hidden;
+    if (wasOpen) { close(); return; }
+    renderPanel();
+    panel.hidden = false;
+    trigger.classList.add('open');
+    setTimeout(() => document.addEventListener('click', onDocClick), 0);
+    const search = panel.querySelector('#toolsClientPicker');
+    if (search) search.focus();
+  });
+}
 
 /* ── PIPELINE VIEW ──────────────────────────────────────────────── */
 function renderPipeline(root) {
@@ -689,7 +888,7 @@ function productionCardHTML(c) {
   const prog = checklistProgress(c.weeklyChecklist);
   const prevProg = checklistProgress(c.prevWeekChecklist);
   const prevHTML = c.prevWeekChecklist
-    ? `<span class="prev-week-indicator" title="Last week">${prevProg.done === prevProg.total ? '✅' : prevProg.done + '/' + prevProg.total}</span>`
+    ? `<span class="prev-week-indicator" title="Last week">${prevProg.done === prevProg.total ? 'Done' : prevProg.done + '/' + prevProg.total}</span>`
     : '';
 
   return `
@@ -739,25 +938,13 @@ function renderClientDetail(root, clientId) {
 
   // ── Action links (collapsible) ──
   const sett = client.settings || {};
-  const hasAnalytics = sett.metricool_id && sett.metricool_id.trim();
-  const clientLinks = [
-    { url: sett.gdrive_url,            label: '📁 Google Drive' },
-    { url: sett.sf_scripts_url,        label: '📝 SF Scripts' },
-    { url: sett.lf_scripts_url,        label: '📝 LF Scripts' },
-    { url: sett.main_links_url,        label: '📎 Main Links' },
-    { url: sett.kpis_url,              label: '📈 KPIs' },
-    { url: sett.growth_ops_url,        label: '🚀 Growth Ops' },
-    { url: sett.written_content_url,   label: '✏️ Written Content' },
-    { url: sett.ai_url,                label: '🤖 AI' },
-    { url: sett.social_dashboard_url,  label: '📱 Social Dashboard' },
-    { url: `https://qc.contentcartel.net/dna`,  label: '🧬 DNA / Client Prompt' },
-  ].filter(l => l.url && l.url.trim());
-  const allLinkCount = clientLinks.length + (hasAnalytics ? 1 : 0);
+  const { analytics, links: clientLinks } = buildClientLinks(client);
+  const allLinkCount = clientLinks.length + (analytics ? 1 : 0);
   const hasAnyLinks = allLinkCount > 0;
 
   const actionLinksBody = hasAnyLinks ? `
     <div class="action-links">
-      ${hasAnalytics ? `<a class="action-link-btn" href="${ANALYTICS_BASE}${sett.metricool_id.trim()}" target="_blank" rel="noopener">📊 Analytics ↗</a>` : ''}
+      ${analytics ? `<a class="action-link-btn" href="${analytics.url}" target="_blank" rel="noopener">${analytics.label} ↗</a>` : ''}
       ${clientLinks.map(l => `<a class="action-link-btn" href="${l.url.trim()}" target="_blank" rel="noopener">${l.label} ↗</a>`).join('')}
     </div>` : '<div class="empty-hint">No links configured</div>';
   const actionLinksSection = collapsibleSection('links', 'Quick Links', `${allLinkCount} link${allLinkCount !== 1 ? 's' : ''}`, actionLinksBody);
@@ -864,11 +1051,9 @@ function renderClientDetail(root, clientId) {
   const activeGoals = clientGoals.filter(g => g.status === 'active');
   const completedGoals = clientGoals.filter(g => g.status === 'completed');
 
-  const goalTypeEmoji = { kpi: '📊', milestone: '🎯', goal: '🏆', note: '📝' };
   const goalTypeColors = { kpi: '#3b82f6', milestone: '#d4a843', goal: '#22c55e', note: '#a1a1aa' };
 
   function renderGoalCard(g) {
-    const emoji = goalTypeEmoji[g.goal_type] || '📝';
     const color = goalTypeColors[g.goal_type] || '#a1a1aa';
     const hasProgress = g.target_value && g.current_value !== null && g.current_value !== undefined;
     const pct = hasProgress ? Math.min(100, Math.round((parseFloat(g.current_value) / parseFloat(g.target_value)) * 100)) : null;
@@ -878,7 +1063,7 @@ function renderClientDetail(root, clientId) {
     return `
       <div class="goal-card" data-goal-id="${g.id}">
         <div class="goal-card-header">
-          <span class="goal-type-badge" style="background:${color}20;color:${color}">${emoji} ${g.goal_type.toUpperCase()}</span>
+          <span class="goal-type-badge" style="background:${color}20;color:${color}">${g.goal_type.toUpperCase()}</span>
           <div class="goal-actions">
             ${g.status === 'active' ? `<button class="goal-complete-btn" data-goal-id="${g.id}" title="Mark complete">✓</button>` : ''}
             <button class="goal-delete-btn" data-goal-id="${g.id}" title="Delete">×</button>
@@ -897,7 +1082,7 @@ function renderClientDetail(root, clientId) {
             </div>
           </div>` : ''}
         <div class="goal-meta">
-          ${dueStr ? `<span class="goal-due ${isOverdue ? 'overdue' : ''}">${isOverdue ? '⚠️ Overdue: ' : '📅 '}${dueStr}</span>` : ''}
+          ${dueStr ? `<span class="goal-due ${isOverdue ? 'overdue' : ''}">${isOverdue ? 'Overdue: ' : 'Due '}${dueStr}</span>` : ''}
           ${g.status === 'completed' ? '<span class="goal-status-done">✓ Completed</span>' : ''}
         </div>
         ${g.status === 'active' && hasProgress ? `
@@ -913,10 +1098,10 @@ function renderClientDetail(root, clientId) {
       <div class="goal-add-form" id="goalAddForm">
         <div class="goal-form-row">
           <select class="settings-input goal-type-select" id="goalType">
-            <option value="kpi">📊 KPI</option>
-            <option value="milestone">🎯 Milestone</option>
-            <option value="goal">🏆 Goal</option>
-            <option value="note">📝 Note</option>
+            <option value="kpi">KPI</option>
+            <option value="milestone">Milestone</option>
+            <option value="goal">Goal</option>
+            <option value="note">Note</option>
           </select>
           <input class="settings-input goal-title-input" id="goalTitle" placeholder="Goal title..." />
         </div>
@@ -994,43 +1179,43 @@ function renderClientDetail(root, clientId) {
 
     <div class="settings-group-label">Client Links</div>
     <div class="settings-row">
-      <span class="settings-label">📁 Google Drive</span>
+      <span class="settings-label">Google Drive</span>
       <input class="settings-input" id="settGdrive" type="url" placeholder="https://drive.google.com/..." value="${escHTML(sett.gdrive_url || '')}" />
     </div>
     <div class="settings-row">
-      <span class="settings-label">📝 SF Scripts</span>
+      <span class="settings-label">SF Scripts</span>
       <input class="settings-input" id="settSfScripts" type="url" placeholder="https://docs.google.com/..." value="${escHTML(sett.sf_scripts_url || '')}" />
     </div>
     <div class="settings-row">
-      <span class="settings-label">📝 LF Scripts</span>
+      <span class="settings-label">LF Scripts</span>
       <input class="settings-input" id="settLfScripts" type="url" placeholder="https://docs.google.com/..." value="${escHTML(sett.lf_scripts_url || '')}" />
     </div>
     <div class="settings-row">
-      <span class="settings-label">📎 Main Links</span>
+      <span class="settings-label">Main Links</span>
       <input class="settings-input" id="settMainLinks" type="url" placeholder="https://..." value="${escHTML(sett.main_links_url || '')}" />
     </div>
     <div class="settings-row">
-      <span class="settings-label">📈 KPIs</span>
+      <span class="settings-label">KPIs</span>
       <input class="settings-input" id="settKpis" type="url" placeholder="https://..." value="${escHTML(sett.kpis_url || '')}" />
     </div>
     <div class="settings-row">
-      <span class="settings-label">🚀 Growth Ops</span>
+      <span class="settings-label">Growth Ops</span>
       <input class="settings-input" id="settGrowthOps" type="url" placeholder="https://..." value="${escHTML(sett.growth_ops_url || '')}" />
     </div>
     <div class="settings-row">
-      <span class="settings-label">✏️ Written Content</span>
+      <span class="settings-label">Written Content</span>
       <input class="settings-input" id="settWrittenContent" type="url" placeholder="https://docs.google.com/..." value="${escHTML(sett.written_content_url || '')}" />
     </div>
     <div class="settings-row">
-      <span class="settings-label">🤖 AI</span>
+      <span class="settings-label">AI</span>
       <input class="settings-input" id="settAi" type="url" placeholder="https://..." value="${escHTML(sett.ai_url || '')}" />
     </div>
     <div class="settings-row">
-      <span class="settings-label">📱 Social Dashboard</span>
+      <span class="settings-label">Social Dashboard</span>
       <input class="settings-input" id="settSocialDashboard" type="url" placeholder="https://..." value="${escHTML(sett.social_dashboard_url || '')}" />
     </div>
     <div class="settings-row">
-      <span class="settings-label">🧬 Client DNA</span>
+      <span class="settings-label">Client DNA</span>
       <input class="settings-input" id="settDnaDoc" type="url" placeholder="https://docs.google.com/..." value="${escHTML(sett.dna_doc_url || '')}" />
     </div>
 
@@ -1068,11 +1253,19 @@ function renderClientDetail(root, clientId) {
     </div>`;
   const funnelSection = isProduction ? collapsibleSection('funnel', 'Funnel', funnelSummary, funnelBody) : '';
 
+  // ── Calendar inline + Tasks sections (defined in calendar.js / tasks.js) ──
+  const calendarInlineSection = (typeof window.calendarInlineSectionHTML === 'function')
+    ? window.calendarInlineSectionHTML(client)
+    : '';
+  const tasksSection = (typeof window.tasksSectionHTML === 'function')
+    ? window.tasksSectionHTML(client)
+    : '';
+
   root.innerHTML = `
     <div class="detail-header">
       <div class="detail-name">${client.name}</div>
       <div style="display:flex;gap:8px;align-items:center">
-        <button class="clone-client-btn" id="cloneClientBtn" title="Clone client">📋 Clone</button>
+        <button class="clone-client-btn" id="cloneClientBtn" title="Clone client">Clone</button>
         <button class="delete-client-btn" id="deleteClientBtn" title="Remove client">Remove</button>
       </div>
     </div>
@@ -1082,6 +1275,8 @@ function renderClientDetail(root, clientId) {
     ${onboardingChecklistSection}
     ${weeklyChecklistSection}
     ${funnelSection}
+    ${calendarInlineSection}
+    ${tasksSection}
     ${goalsSection}
     ${settingsSection}
     ${activitySection}
@@ -1089,6 +1284,15 @@ function renderClientDetail(root, clientId) {
 
   // Bind collapsible toggles
   bindCollapsibles(root);
+
+  // Bind tasks + calendar inline sections (modules expose globals)
+  const rerenderDetail = () => renderClientDetail(root, clientId);
+  if (typeof window.bindTasksSection === 'function') {
+    window.bindTasksSection(root, client, rerenderDetail);
+  }
+  if (typeof window.bindCalendarInline === 'function') {
+    window.bindCalendarInline(root, client, rerenderDetail);
+  }
 
   // ── BIND EVENTS ─────────────────────────────────────────────
 
@@ -1212,7 +1416,7 @@ function renderClientDetail(root, clientId) {
       if (allOnboardingDone && check.done) {
         await updatePhase(clientId, 'production');
         cl.phase = 'production';
-        logActivity(clientId, 'auto_advanced', `"${cl.name}" auto-moved to Production (onboarding complete) 🚀`);
+        logActivity(clientId, 'auto_advanced', `"${cl.name}" auto-moved to Production (onboarding complete)`);
         renderClientDetail(root, clientId);
         return;
       }
