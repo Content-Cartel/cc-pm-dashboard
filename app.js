@@ -55,7 +55,7 @@ async function loadData() {
     return;
   }
 
-  const [teamRes, clientRes, assignRes, checkRes, weeklyRes, settingsRes, activityRes, goalsRes, calRes, tasksRes] = await Promise.all([
+  const [teamRes, clientRes, assignRes, checkRes, weeklyRes, settingsRes, activityRes, goalsRes, calRes, tasksRes, metricoolRes] = await Promise.all([
     sb.from('team_members').select('*').order('id'),
     sb.from('clients').select('*').order('id'),
     sb.from('client_team').select('*'),
@@ -66,6 +66,7 @@ async function loadData() {
     sb.from('client_goals').select('*').order('created_at', { ascending: false }),
     sb.from('client_calendar_entries').select('*').order('publish_date', { ascending: true, nullsFirst: false }),
     sb.from('client_tasks').select('*').order('created_at', { ascending: false }),
+    sb.from('client_metricool').select('*'),
   ]);
 
   TEAM = (teamRes.data || []).map(t => ({
@@ -95,6 +96,7 @@ async function loadData() {
       goals: allGoals.filter(g => g.client_id === c.id),
       calendarEntries: allCalendarEntries.filter(e => e.client_id === c.id),
       tasks: allTasks.filter(t => t.client_id === c.id),
+      metricoolBrands: (metricoolRes.data || []).filter(m => m.client_id === c.id),
     };
     const clientWeeklies = allWeeklies.filter(w => w.client_id === c.id);
     client.weeklyChecklist = clientWeeklies.find(w => w.week_start === thisWeek) || null;
@@ -502,7 +504,7 @@ function buildClientLinks(client) {
     { url: sett.ai_url,               label: 'AI' },
     { url: sett.social_dashboard_url, label: 'Social Dashboard' },
     { url: sett.dna_doc_url,          label: 'Client DNA Doc' },
-    { url: 'https://qc.contentcartel.net/dna', label: 'DNA / Client Prompt' },
+    { url: sett.dna_doc_url,                  label: 'DNA / Client Prompt' },
   ].filter(l => l.url && l.url.trim());
   const analytics = sett.metricool_id && sett.metricool_id.trim()
     ? { url: ANALYTICS_BASE + sett.metricool_id.trim(), label: 'Analytics' }
@@ -1149,16 +1151,27 @@ function renderClientDetail(root, clientId) {
       <input class="settings-input" id="settWpw" type="number" min="0" placeholder="0" value="${sett.written_per_week || 0}" style="max-width:100px" />
     </div>
     <div class="settings-row">
-      <span class="settings-label">Metricool ID</span>
-      <input class="settings-input" id="settMetricool" type="text" placeholder="brand-id" value="${escHTML(sett.metricool_id || '')}" />
-    </div>
-    <div class="settings-row">
-      <span class="settings-label">Metricool Blog ID</span>
-      <input class="settings-input" id="settMetricoolBlogId" type="text" placeholder="e.g. 4794381 (from Metricool URL)" value="${escHTML(sett.metricool_blog_id || '')}" />
+      <span class="settings-label">Metricool User ID</span>
+      <input class="settings-input" id="settMetricool" type="text" placeholder="e.g. 3734222" value="${escHTML(sett.metricool_id || '')}" />
     </div>
     <div class="settings-row">
       <span class="settings-label">Slack Channel</span>
       <input class="settings-input" id="settSlack" type="text" placeholder="#client-cc-internal" value="${escHTML(sett.slack_channel || '')}" />
+    </div>
+
+    <div class="settings-group-label">Weekly Reports</div>
+    <div class="settings-row">
+      <span class="settings-label">Enabled</span>
+      <label style="display:inline-flex;align-items:center;gap:6px;">
+        <input type="checkbox" id="settWeeklyReportEnabled" ${sett.weekly_report_enabled ? 'checked' : ''} />
+        <span style="font-size:12px;color:var(--text-muted)">Friday auto-generation in attribution-tracker</span>
+      </label>
+    </div>
+    <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:6px;">
+      <span class="settings-label">Metricool Brands</span>
+      <div id="metricoolBrandsContainer" style="display:flex;flex-direction:column;gap:6px;"></div>
+      <button type="button" id="addBrandBtn" class="btn-save" style="align-self:flex-start;padding:4px 10px;font-size:12px;background:var(--accent,#3b82f6)">+ Add brand</button>
+      <div style="font-size:11px;color:var(--text-muted)">Add one row per brand connected under this Metricool workspace. The attribution-tracker pulls all enabled brands when generating reports.</div>
     </div>
     <div class="settings-group-label">GHL Integration</div>
     <div class="settings-row">
@@ -1593,23 +1606,108 @@ function renderClientDetail(root, clientId) {
   });
 
   // ── SETTINGS ────────────────────────────────────────────────
+  // Metricool brands: render rows in the container + wire add/remove.
+  const brandsContainer = root.querySelector("#metricoolBrandsContainer");
+  const addBrandBtn = root.querySelector("#addBrandBtn");
+  if (brandsContainer) {
+    const PLATFORMS = ['youtube', 'instagram', 'facebook', 'linkedin', 'twitter', 'tiktok'];
+    const normalizePlatforms = (raw) => {
+      if (Array.isArray(raw)) return raw.map(p => String(p).toLowerCase());
+      return ['youtube'];
+    };
+    const existing = (getClient(clientId)?.metricoolBrands || []).slice().sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+    const brandState = existing.length > 0
+      ? existing.map(b => ({
+          blog_id: b.blog_id || '',
+          label: b.label || '',
+          enabled: b.enabled !== false,
+          platforms: normalizePlatforms(b.platforms),
+        }))
+      : [];
+    const renderBrands = () => {
+      brandsContainer.innerHTML = brandState.map((b, i) => `
+        <div class="metricool-brand-row" data-idx="${i}" style="display:flex;flex-direction:column;gap:4px;padding:8px;border:1px solid var(--border,#333);border-radius:6px;">
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input data-field="blog_id" class="settings-input" style="width:110px" type="text" placeholder="blogId" value="${escHTML(String(b.blog_id || ''))}" />
+            <input data-field="label" class="settings-input" style="flex:1" type="text" placeholder="Label (e.g., Personal)" value="${escHTML(b.label || '')}" />
+            <label style="font-size:11px;color:var(--text-muted);display:inline-flex;align-items:center;gap:4px;">
+              <input data-field="enabled" type="checkbox" ${b.enabled ? 'checked' : ''} />
+              Enabled
+            </label>
+            <button type="button" data-action="remove-brand" class="btn-save" style="padding:4px 8px;font-size:11px;background:#ef4444;">✕</button>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--text-muted);padding-left:2px;">
+            ${PLATFORMS.map(p => `
+              <label style="display:inline-flex;align-items:center;gap:3px;">
+                <input data-field="platform" data-platform="${p}" type="checkbox" ${b.platforms.includes(p) ? 'checked' : ''} />
+                ${p}
+              </label>
+            `).join('')}
+          </div>
+        </div>`).join('') || '<div style="font-size:11px;color:var(--text-muted)">No brands yet — click + Add brand</div>';
+    };
+    renderBrands();
+    brandsContainer.addEventListener('input', (e) => {
+      const row = e.target.closest('.metricool-brand-row');
+      if (!row) return;
+      const i = parseInt(row.dataset.idx, 10);
+      const field = e.target.dataset.field;
+      if (field === 'enabled') brandState[i].enabled = e.target.checked;
+      else if (field === 'platform') {
+        const platform = e.target.dataset.platform;
+        const has = brandState[i].platforms.includes(platform);
+        if (e.target.checked && !has) brandState[i].platforms = [...brandState[i].platforms, platform];
+        else if (!e.target.checked && has) brandState[i].platforms = brandState[i].platforms.filter(p => p !== platform);
+      }
+      else brandState[i][field] = e.target.value;
+    });
+    brandsContainer.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-action="remove-brand"]');
+      if (!btn) return;
+      const row = btn.closest('.metricool-brand-row');
+      const i = parseInt(row.dataset.idx, 10);
+      brandState.splice(i, 1);
+      renderBrands();
+    });
+    if (addBrandBtn) {
+      addBrandBtn.addEventListener('click', () => {
+        brandState.push({ blog_id: '', label: '', enabled: true, platforms: ['youtube'] });
+        renderBrands();
+      });
+    }
+    // Expose current state to save handler via DOM dataset
+    brandsContainer._getBrandState = () => brandState;
+  }
+
   const saveSettingsBtn = root.querySelector("#saveSettingsBtn");
   if (saveSettingsBtn) {
     saveSettingsBtn.addEventListener("click", async () => {
       const ghlLocationId = root.querySelector("#settGhlLocationId").value.trim();
       const ghlToken = root.querySelector("#settGhlToken").value.trim();
 
-      // Save settings to Supabase (token is NOT stored in Supabase)
-      const metricoolBlogId = root.querySelector("#settMetricoolBlogId").value.trim();
+      const weeklyReportEnabled = root.querySelector("#settWeeklyReportEnabled")?.checked === true;
+      const brandState = brandsContainer?._getBrandState?.() || [];
+      const cleanBrands = brandState
+        .map(b => ({
+          blog_id: String(b.blog_id).trim(),
+          label: (b.label || '').trim() || null,
+          enabled: b.enabled !== false,
+          platforms: Array.isArray(b.platforms) && b.platforms.length > 0 ? b.platforms : ['youtube'],
+        }))
+        .filter(b => b.blog_id !== '');
+
+      // Save settings to Supabase (token is NOT stored in Supabase).
+      // metricool_blog_id mirrors the first brand for backward-compat with older consumers.
       await saveClientSettings(clientId, {
         videos_per_week:     parseInt(root.querySelector("#settVpw").value) || 0,
         shorts_per_week:     parseInt(root.querySelector("#settSpw").value) || 0,
         written_per_week:    parseInt(root.querySelector("#settWpw").value) || 0,
         metricool_id:        root.querySelector("#settMetricool").value.trim(),
-        metricool_blog_id:   metricoolBlogId,
+        metricool_blog_id:   cleanBrands[0]?.blog_id || '',
         slack_channel:       root.querySelector("#settSlack").value.trim(),
         ghl_location_id:     ghlLocationId,
         lead_value_dollars:  parseFloat(root.querySelector("#settLeadValue").value) || 0,
+        weekly_report_enabled: weeklyReportEnabled,
         gdrive_url:          root.querySelector("#settGdrive").value.trim(),
         sf_scripts_url:      root.querySelector("#settSfScripts").value.trim(),
         lf_scripts_url:      root.querySelector("#settLfScripts").value.trim(),
@@ -1639,17 +1737,29 @@ function renderClientDetail(root, clientId) {
         }
       }
 
-      // Auto-sync Metricool Blog ID to client_metricool table
-      if (metricoolBlogId) {
-        try {
-          await sb.from('client_metricool').upsert({
+      // Sync multi-brand Metricool state: replace all rows for this client.
+      try {
+        await sb.from('client_metricool').delete().eq('client_id', clientId);
+        if (cleanBrands.length > 0) {
+          await sb.from('client_metricool').insert(cleanBrands.map(b => ({
             client_id: clientId,
-            blog_id: metricoolBlogId,
-            platforms: ["youtube"],
-          }, { onConflict: 'client_id' });
-        } catch (err) {
-          console.error("Metricool blog ID sync error:", err);
+            blog_id: b.blog_id,
+            user_id: root.querySelector("#settMetricool").value.trim() || null,
+            label: b.label,
+            enabled: b.enabled,
+            platforms: b.platforms,
+          })));
         }
+        const cl = getClient(clientId);
+        if (cl) cl.metricoolBrands = cleanBrands.map(b => ({
+          client_id: clientId,
+          blog_id: b.blog_id,
+          label: b.label,
+          enabled: b.enabled,
+          platforms: b.platforms,
+        }));
+      } catch (err) {
+        console.error("Metricool brands sync error:", err);
       }
 
       saveSettingsBtn.textContent = "Saved ✓";
