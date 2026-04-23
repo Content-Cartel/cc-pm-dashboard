@@ -503,8 +503,7 @@ function buildClientLinks(client) {
     { url: sett.written_content_url,  label: 'Written Content' },
     { url: sett.ai_url,               label: 'AI' },
     { url: sett.social_dashboard_url, label: 'Social Dashboard' },
-    { url: sett.dna_doc_url,          label: 'Client DNA Doc' },
-    { url: sett.dna_doc_url,                  label: 'DNA / Client Prompt' },
+    { url: sett.dna_doc_url,          label: 'Client DNA' },
   ].filter(l => l.url && l.url.trim());
   const analytics = sett.metricool_id && sett.metricool_id.trim()
     ? { url: ANALYTICS_BASE + sett.metricool_id.trim(), label: 'Analytics' }
