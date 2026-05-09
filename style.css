@@ -1409,3 +1409,204 @@ button { cursor: pointer; font-family: var(--font); }
   .cal-cell-entries .cal-entry-title { display: none; }
   .tools-dropdown { width: calc(100vw - 20px); right: -10px; }
 }
+
+/* ════════════════════════════════════════════════════════════════
+   FAILURE LOG + SYSTEM HEALTH
+   Migration 13. Owned by Kayla; Moi reviews Friday + monthly.
+   ════════════════════════════════════════════════════════════════ */
+
+.failure-page,
+.health-page {
+  display: flex; flex-direction: column; gap: 18px;
+  padding: 18px 0;
+}
+
+.failure-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+}
+.failure-header-actions { display: flex; gap: 8px; align-items: center; }
+.detail-section-subtitle { font-size: 12px; color: var(--text-3); margin-top: 4px; }
+
+.failure-filters {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  padding: 12px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.failure-filters .settings-input {
+  font-size: 12px; padding: 7px 10px; min-width: 140px;
+}
+
+/* ── Table ──────────────────────────────────────────────────── */
+.failure-table {
+  width: 100%; border-collapse: collapse;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+  font-size: 12px;
+}
+.failure-table th,
+.failure-table td { padding: 10px 12px; text-align: left; vertical-align: middle; }
+.failure-table th {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--text-3);
+  border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02);
+}
+.failure-table tbody tr { border-top: 1px solid var(--border); }
+.failure-table tbody tr:hover { background: rgba(255,255,255,0.02); }
+.failure-table a { color: var(--gold); text-decoration: none; }
+.failure-table a:hover { text-decoration: underline; }
+
+.failure-row-escalated { background: rgba(245,158,11,0.06); }
+.failure-row-escalated:hover { background: rgba(245,158,11,0.1); }
+.failure-escalate-flag {
+  display: inline-block;
+  font-size: 10px; font-weight: 700;
+  color: var(--amber);
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(245,158,11,0.12);
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
+.failure-date { white-space: nowrap; color: var(--text-3); font-size: 11px; }
+.failure-what { max-width: 360px; line-height: 1.4; }
+
+/* ── Station tag ────────────────────────────────────────────── */
+.failure-station {
+  display: inline-block;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 8px; border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-2);
+}
+.failure-station-onboarding   { color: var(--gold); border-color: rgba(212,168,67,0.3); background: rgba(212,168,67,0.08); }
+.failure-station-strategy     { color: #A78BFA; border-color: rgba(167,139,250,0.3); background: rgba(167,139,250,0.08); }
+.failure-station-production   { color: #60A5FA; border-color: rgba(96,165,250,0.3); background: rgba(96,165,250,0.08); }
+.failure-station-distribution { color: #34D399; border-color: rgba(52,211,153,0.3); background: rgba(52,211,153,0.08); }
+.failure-station-reporting    { color: var(--amber); border-color: rgba(245,158,11,0.3); background: rgba(245,158,11,0.08); }
+
+/* ── Source ─────────────────────────────────────────────────── */
+.failure-source {
+  display: inline-block; font-size: 10px; color: var(--text-3);
+  padding: 2px 6px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* ── Status select / pill ──────────────────────────────────── */
+.failure-status-select {
+  font-size: 11px; font-weight: 600;
+  padding: 5px 8px; border-radius: var(--radius-sm);
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  font-family: var(--font); cursor: pointer;
+  min-width: 110px;
+}
+.failure-status-select:hover { border-color: var(--border2); }
+.failure-status-select:focus { outline: none; border-color: var(--gold-dim); }
+.failure-status-pill {
+  display: inline-block; font-size: 10px; font-weight: 700;
+  padding: 3px 8px; border-radius: 999px;
+}
+.failure-status-open         { color: var(--amber);  background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.3); }
+.failure-status-in-progress  { color: #60A5FA;       background: rgba(96,165,250,0.12); border-color: rgba(96,165,250,0.3); }
+.failure-status-resolved     { color: #34D399;       background: rgba(52,211,153,0.12); border-color: rgba(52,211,153,0.3); }
+.failure-status-blocked      { color: var(--red);    background: rgba(239,68,68,0.12);  border-color: rgba(239,68,68,0.3); }
+
+/* ── Row buttons ────────────────────────────────────────────── */
+.failure-row-edit,
+.failure-row-delete {
+  background: none; border: 1px solid var(--border);
+  color: var(--text-3);
+  width: 24px; height: 24px; border-radius: var(--radius-sm);
+  font-size: 14px; cursor: pointer; font-family: var(--font);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all var(--transition);
+  margin-left: 4px;
+}
+.failure-row-edit:hover { color: var(--text); border-color: var(--border2); background: rgba(255,255,255,0.04); }
+.failure-row-delete:hover { color: var(--red); border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.08); }
+.failure-row-delete[data-confirm="1"] { background: var(--red); color: #fff; border-color: var(--red); }
+
+/* ── Per-client badge (shown on cards + detail header) ─────── */
+.failure-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px;
+  padding: 0 6px; margin-left: 6px;
+  font-size: 10px; font-weight: 800;
+  color: #fff; background: var(--red);
+  border-radius: 999px;
+  vertical-align: middle;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.failure-badge-escalated {
+  background: var(--amber);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 8px rgba(245,158,11,0.5);
+  animation: failurePulse 2s ease-in-out infinite;
+}
+@keyframes failurePulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--bg), 0 0 8px rgba(245,158,11,0.5); }
+  50%      { box-shadow: 0 0 0 2px var(--bg), 0 0 14px rgba(245,158,11,0.9); }
+}
+
+/* ── System Health ──────────────────────────────────────────── */
+.health-section {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 16px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.health-section-title {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.health-station-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+.health-station-card {
+  padding: 14px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.health-station-name {
+  font-size: 12px; font-weight: 700;
+  color: var(--text);
+}
+.health-station-counts {
+  display: flex; gap: 18px;
+}
+.health-station-counts > div { display: flex; flex-direction: column; gap: 2px; }
+.health-num {
+  font-size: 22px; font-weight: 800; color: var(--gold);
+  line-height: 1;
+}
+.health-label {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--text-3);
+}
+
+/* ── Modal sized for failures ──────────────────────────────── */
+.failure-modal { max-width: 580px; }
+.failure-modal .cc-modal-body { display: flex; flex-direction: column; gap: 10px; }
+.failure-modal .settings-label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 11px; font-weight: 600; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  min-width: unset;
+}
+.failure-modal .settings-input { font-size: 13px; padding: 8px 10px; }
+.failure-modal .settings-checkbox {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text-2);
+  padding-top: 4px;
+}
+
+@media (max-width: 900px) {
+  .failure-table { font-size: 11px; }
+  .failure-table th:nth-child(7),
+  .failure-table td:nth-child(7) { display: none; } /* hide source on mobile */
+}

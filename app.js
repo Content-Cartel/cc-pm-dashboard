@@ -55,7 +55,7 @@ async function loadData() {
     return;
   }
 
-  const [teamRes, clientRes, assignRes, checkRes, weeklyRes, settingsRes, activityRes, goalsRes, calRes, tasksRes, metricoolRes] = await Promise.all([
+  const [teamRes, clientRes, assignRes, checkRes, weeklyRes, settingsRes, activityRes, goalsRes, calRes, tasksRes, metricoolRes, failuresRes] = await Promise.all([
     sb.from('team_members').select('*').order('id'),
     sb.from('clients').select('*').order('id'),
     sb.from('client_team').select('*'),
@@ -67,7 +67,11 @@ async function loadData() {
     sb.from('client_calendar_entries').select('*').order('publish_date', { ascending: true, nullsFirst: false }),
     sb.from('client_tasks').select('*').order('created_at', { ascending: false }),
     sb.from('client_metricool').select('*'),
+    sb.from('failure_log').select('*').order('date_logged', { ascending: false }),
   ]);
+
+  // Hydrate window.FAILURES so failures.js can read it without an extra fetch
+  window.FAILURES = failuresRes.data || [];
 
   TEAM = (teamRes.data || []).map(t => ({
     id: t.id, initials: t.initials, name: t.name, role: t.role
@@ -615,6 +619,12 @@ function getRoute() {
   if (path === "/team") {
     return { view: "team" };
   }
+  if (path === "/failures") {
+    return { view: "failures" };
+  }
+  if (path === "/health") {
+    return { view: "health" };
+  }
   return { view: "pipeline" };
 }
 
@@ -630,7 +640,7 @@ function render() {
 
   const backLink = document.getElementById("backLink");
   if (backLink) {
-    const showBack = route.view === "client" || route.view === "clientCalendar" || route.view === "company" || route.view === "team";
+    const showBack = route.view === "client" || route.view === "clientCalendar" || route.view === "company" || route.view === "team" || route.view === "failures" || route.view === "health";
     backLink.classList.toggle("visible", showBack);
     if (route.view === "clientCalendar") {
       backLink.setAttribute("href", `#/client/${route.id}`);
@@ -653,6 +663,18 @@ function render() {
     renderCompanyLinks(root);
   } else if (route.view === "team") {
     renderTeamManagement(root);
+  } else if (route.view === "failures") {
+    if (typeof window.renderFailureLog === "function") {
+      window.renderFailureLog(root);
+    } else {
+      root.innerHTML = `<div class="empty-state">Failures module not loaded.</div>`;
+    }
+  } else if (route.view === "health") {
+    if (typeof window.renderSystemHealth === "function") {
+      window.renderSystemHealth(root);
+    } else {
+      root.innerHTML = `<div class="empty-state">Health module not loaded.</div>`;
+    }
   } else {
     renderPipeline(root);
   }
@@ -699,6 +721,8 @@ function mountToolsDropdown() {
         <a class="tools-link" href="https://tracking.contentcartel.net" target="_blank" rel="noopener">Attribution Tracker ↗</a>
         <a class="tools-link" href="https://analytics.contentcartel.net/" target="_blank" rel="noopener">Analytics ↗</a>
         <a class="tools-link" href="https://content-cartel-1.app.n8n.cloud" target="_blank" rel="noopener">n8n ↗</a>
+        <a class="tools-link" href="#/failures" data-internal>Failure Log</a>
+        <a class="tools-link" href="#/health" data-internal>System Health</a>
         <a class="tools-link" href="#/company" data-internal>Company Links</a>
         <a class="tools-link" href="#/team" data-internal>Team</a>
       </div>
@@ -853,9 +877,10 @@ function buildCol(title, subtitle, clients, cardFn) {
 }
 
 function pipelineCardHTML(c) {
+  const badge = (typeof window.failureBadgeHTML === 'function') ? window.failureBadgeHTML(c.id) : '';
   return `
     <div class="client-card muted" data-id="${c.id}">
-      <div class="card-name">${c.name}</div>
+      <div class="card-name">${c.name}${badge}</div>
     </div>`;
 }
 
@@ -870,10 +895,11 @@ function onboardingCardHTML(c) {
   const avatarsHTML = c.team && c.team.length
     ? `<div class="card-avatars-group"><span class="card-team-label">Team:</span><div class="card-avatars">${c.team.slice(0,3).map(avatarHTML).join("")}</div></div>`
     : '';
+  const badge = (typeof window.failureBadgeHTML === 'function') ? window.failureBadgeHTML(c.id) : '';
 
   return `
     <div class="client-card" data-id="${c.id}">
-      <div class="card-name">${c.name}</div>
+      <div class="card-name">${c.name}${badge}</div>
       ${progressHTML}
       ${avatarsHTML ? `<div class="card-footer">${avatarsHTML}</div>` : ''}
     </div>`;
@@ -892,10 +918,11 @@ function productionCardHTML(c) {
   const prevHTML = c.prevWeekChecklist
     ? `<span class="prev-week-indicator" title="Last week">${prevProg.done === prevProg.total ? 'Done' : prevProg.done + '/' + prevProg.total}</span>`
     : '';
+  const badge = (typeof window.failureBadgeHTML === 'function') ? window.failureBadgeHTML(c.id) : '';
 
   return `
     <div class="client-card" data-id="${c.id}">
-      <div class="card-name">${c.name}</div>
+      <div class="card-name">${c.name}${badge}</div>
       ${specialHTML}
       ${postedProgressHTML(c)}
       ${avatarsHTML ? `<div class="card-footer">${avatarsHTML}</div>` : ''}
