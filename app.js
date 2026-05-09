@@ -679,16 +679,24 @@ function render() {
     renderPipeline(root);
   }
 
-  // Update stat pills
-  const pillClients = document.getElementById("pillClients");
+  // Update stat pills — production count, open failures, resolved this week
   const pillProd = document.getElementById("pillProduction");
-  const pillDeliv = document.getElementById("pillDeliverables");
-  if (pillClients) pillClients.textContent = `${CLIENTS.length} clients`;
+  const pillFailuresOpen = document.getElementById("pillFailuresOpen");
+  const pillFailuresResolved = document.getElementById("pillFailuresResolved");
   const prodClients = CLIENTS.filter(c => c.phase === "production" || c.phase === "special");
   if (pillProd) pillProd.textContent = `${prodClients.length} in production`;
-  const totalChecked = prodClients.reduce((sum, c) => sum + checklistProgress(c.weeklyChecklist, getActiveSteps(c)).done, 0);
-  const totalPossible = prodClients.reduce((sum, c) => sum + getActiveSteps(c).length, 0);
-  if (pillDeliv) pillDeliv.textContent = `${totalChecked}/${totalPossible} steps done`;
+
+  const failures = window.FAILURES || [];
+  const openFailures = failures.filter(f => f.status === 'Open' || f.status === 'In-progress');
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const resolvedThisWeek = failures.filter(f =>
+    f.status === 'Resolved' && f.resolved_at && new Date(f.resolved_at).getTime() >= sevenDaysAgo
+  );
+  if (pillFailuresOpen) {
+    pillFailuresOpen.textContent = `${openFailures.length} open failure${openFailures.length === 1 ? '' : 's'}`;
+    pillFailuresOpen.classList.toggle('stat-pill-warn', openFailures.length > 0);
+  }
+  if (pillFailuresResolved) pillFailuresResolved.textContent = `${resolvedThisWeek.length} resolved this week`;
 }
 
 window.addEventListener("hashchange", render);
@@ -912,19 +920,12 @@ function productionCardHTML(c) {
   const specialHTML = c.specialLabel
     ? `<span class="special-badge">${c.specialLabel}</span>`
     : '';
-
-  const prog = checklistProgress(c.weeklyChecklist);
-  const prevProg = checklistProgress(c.prevWeekChecklist);
-  const prevHTML = c.prevWeekChecklist
-    ? `<span class="prev-week-indicator" title="Last week">${prevProg.done === prevProg.total ? 'Done' : prevProg.done + '/' + prevProg.total}</span>`
-    : '';
   const badge = (typeof window.failureBadgeHTML === 'function') ? window.failureBadgeHTML(c.id) : '';
 
   return `
     <div class="client-card" data-id="${c.id}">
       <div class="card-name">${c.name}${badge}</div>
       ${specialHTML}
-      ${postedProgressHTML(c)}
       ${avatarsHTML ? `<div class="card-footer">${avatarsHTML}</div>` : ''}
     </div>`;
 }
@@ -1072,53 +1073,43 @@ function renderClientDetail(root, clientId) {
       ${wpw > 0 ? `<button class="posted-pill ${wcPosted >= wpw ? 'complete' : ''}" data-type="wc_posted" data-max="${wpw}" data-current="${wcPosted}">${wcPosted}/${wpw} written</button>` : ''}
     </div>` : '';
 
-  const weeklyChecklistBody = `<div id="weeklyChecklist-${client.id}">${postedPills}</div>`;
-  const weeklyChecklistSection = isProduction ? collapsibleSection('weekly', 'Weekly Checklist', postedSummary, weeklyChecklistBody, { defaultOpen: true }) : '';
+  // Weekly Checklist UI removed — keep weekly_checklist Supabase table + n8n webhook intact.
+  const weeklyChecklistSection = '';
 
-  // ── Goals & KPIs section (collapsible) ──
+  // ── Goals & KPIs section (simplified: title + target + current only) ──
   const clientGoals = client.goals || [];
   const activeGoals = clientGoals.filter(g => g.status === 'active');
   const completedGoals = clientGoals.filter(g => g.status === 'completed');
 
-  const goalTypeColors = { kpi: '#3b82f6', milestone: '#d4a843', goal: '#22c55e', note: '#a1a1aa' };
-
   function renderGoalCard(g) {
-    const color = goalTypeColors[g.goal_type] || '#a1a1aa';
     const hasProgress = g.target_value && g.current_value !== null && g.current_value !== undefined;
     const pct = hasProgress ? Math.min(100, Math.round((parseFloat(g.current_value) / parseFloat(g.target_value)) * 100)) : null;
-    const dueStr = g.due_date ? new Date(g.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
-    const isOverdue = g.due_date && new Date(g.due_date) < new Date() && g.status === 'active';
 
     return `
       <div class="goal-card" data-goal-id="${g.id}">
         <div class="goal-card-header">
-          <span class="goal-type-badge" style="background:${color}20;color:${color}">${g.goal_type.toUpperCase()}</span>
+          <div class="goal-title">${escHTML(g.title)}</div>
           <div class="goal-actions">
             ${g.status === 'active' ? `<button class="goal-complete-btn" data-goal-id="${g.id}" title="Mark complete">✓</button>` : ''}
             <button class="goal-delete-btn" data-goal-id="${g.id}" title="Delete">×</button>
           </div>
         </div>
-        <div class="goal-title">${escHTML(g.title)}</div>
-        ${g.description ? `<div class="goal-desc">${escHTML(g.description)}</div>` : ''}
         ${hasProgress ? `
           <div class="goal-progress-wrap">
             <div class="goal-progress-bar">
-              <div class="goal-progress-fill" style="width:${pct}%;background:${pct >= 100 ? 'var(--green,#22c55e)' : color}"></div>
+              <div class="goal-progress-fill" style="width:${pct}%;background:${pct >= 100 ? 'var(--green,#22c55e)' : 'var(--gold)'}"></div>
             </div>
             <div class="goal-progress-label">
               <span>${g.current_value} / ${g.target_value}</span>
               <span>${pct}%</span>
             </div>
           </div>` : ''}
-        <div class="goal-meta">
-          ${dueStr ? `<span class="goal-due ${isOverdue ? 'overdue' : ''}">${isOverdue ? 'Overdue: ' : 'Due '}${dueStr}</span>` : ''}
-          ${g.status === 'completed' ? '<span class="goal-status-done">✓ Completed</span>' : ''}
-        </div>
         ${g.status === 'active' && hasProgress ? `
           <div class="goal-update-row">
             <input type="number" class="goal-value-input" data-goal-id="${g.id}" placeholder="Update value..." value="" step="any" />
             <button class="goal-update-btn" data-goal-id="${g.id}">Update</button>
           </div>` : ''}
+        ${g.status === 'completed' ? '<div class="goal-meta"><span class="goal-status-done">✓ Completed</span></div>' : ''}
       </div>`;
   }
 
@@ -1126,22 +1117,12 @@ function renderClientDetail(root, clientId) {
     <div class="goals-container">
       <div class="goal-add-form" id="goalAddForm">
         <div class="goal-form-row">
-          <select class="settings-input goal-type-select" id="goalType">
-            <option value="kpi">KPI</option>
-            <option value="milestone">Milestone</option>
-            <option value="goal">Goal</option>
-            <option value="note">Note</option>
-          </select>
-          <input class="settings-input goal-title-input" id="goalTitle" placeholder="Goal title..." />
-        </div>
-        <div class="goal-form-row">
-          <input class="settings-input" id="goalDesc" placeholder="Description (optional)" />
+          <input class="settings-input goal-title-input" id="goalTitle" placeholder="Goal title..." style="flex:1" />
         </div>
         <div class="goal-form-row">
           <input class="settings-input" id="goalTarget" type="number" placeholder="Target value" step="any" />
           <input class="settings-input" id="goalCurrent" type="number" placeholder="Current value" step="any" />
-          <input class="settings-input" id="goalDue" type="date" />
-          <button class="btn-primary goal-add-btn" id="goalAddBtn">Add Goal</button>
+          <button class="btn-primary goal-add-btn" id="goalAddBtn">Add</button>
         </div>
       </div>
       ${activeGoals.length > 0 ? `
@@ -1271,27 +1252,8 @@ function renderClientDetail(root, clientId) {
     </div>`).join("");
   const activitySection = collapsibleSection('activity', 'Recent Activity', `${clientActivity.length} event${clientActivity.length !== 1 ? 's' : ''}`, activityBody);
 
-  // ── Funnel Status section (collapsible) ──
-  const funnelActive = FUNNEL_STEPS.filter(f => wc && wc[f.key]).length;
-  const funnelTotal = FUNNEL_STEPS.length;
-  const funnelSummary = isProduction
-    ? (funnelActive === funnelTotal ? 'All active' : `${funnelActive}/${funnelTotal} active`)
-    : '';
-  const funnelBody = `
-    <div class="funnel-toggles" data-client="${client.id}">
-      ${FUNNEL_STEPS.map(f => {
-        const isOn = wc ? wc[f.key] : false;
-        return `
-        <div class="funnel-toggle-row">
-          <button class="funnel-toggle ${isOn ? 'active' : ''}" data-step="${f.key}">
-            <span class="funnel-toggle-indicator">${isOn ? '✓' : ''}</span>
-          </button>
-          <span class="funnel-toggle-label">${f.label}</span>
-          <span class="funnel-toggle-status ${isOn ? 'on' : 'off'}">${isOn ? 'Active' : 'Inactive'}</span>
-        </div>`;
-      }).join('')}
-    </div>`;
-  const funnelSection = isProduction ? collapsibleSection('funnel', 'Funnel', funnelSummary, funnelBody) : '';
+  // Funnel UI removed — keep client_settings.funnel_* columns + n8n webhook intact.
+  const funnelSection = '';
 
   // ── Calendar inline + Tasks sections (defined in calendar.js / tasks.js) ──
   const calendarInlineSection = (typeof window.calendarInlineSectionHTML === 'function')
@@ -1549,23 +1511,18 @@ function renderClientDetail(root, clientId) {
   const goalAddBtn = root.querySelector("#goalAddBtn");
   if (goalAddBtn) {
     goalAddBtn.addEventListener("click", async () => {
-      const goalType = root.querySelector("#goalType").value;
       const title = root.querySelector("#goalTitle").value.trim();
-      const description = root.querySelector("#goalDesc").value.trim() || null;
       const targetValue = root.querySelector("#goalTarget").value || null;
       const currentValue = root.querySelector("#goalCurrent").value || null;
-      const dueDate = root.querySelector("#goalDue").value || null;
 
       if (!title) { root.querySelector("#goalTitle").focus(); return; }
 
       const { error } = await sb.from('client_goals').insert({
         client_id: clientId,
-        goal_type: goalType,
+        goal_type: 'goal', // legacy column kept; UI no longer surfaces it
         title,
-        description,
         target_value: targetValue,
         current_value: currentValue,
-        due_date: dueDate,
         status: 'active',
       });
       if (error) { console.error('Goal insert error:', error); return; }

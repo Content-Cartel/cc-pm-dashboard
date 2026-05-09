@@ -1610,3 +1610,10 @@ button { cursor: pointer; font-family: var(--font); }
   .failure-table th:nth-child(7),
   .failure-table td:nth-child(7) { display: none; } /* hide source on mobile */
 }
+
+/* Topbar open-failures pill turns amber when count > 0 */
+.stat-pill-warn {
+  color: var(--amber) !important;
+  border-color: rgba(245,158,11,0.3) !important;
+  background: rgba(245,158,11,0.08) !important;
+}
