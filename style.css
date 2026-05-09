@@ -1617,3 +1617,55 @@ button { cursor: pointer; font-family: var(--font); }
   border-color: rgba(245,158,11,0.3) !important;
   background: rgba(245,158,11,0.08) !important;
 }
+
+/* Per-client Failures section (client detail page) — pairs with Tasks */
+.failure-client-section { display: flex; flex-direction: column; gap: 8px; }
+.failure-client-actions { display: flex; gap: 8px; padding-top: 4px; }
+.failure-client-actions .failure-add-btn { font-size: 12px; padding: 7px 14px; }
+
+.failure-client-list { display: flex; flex-direction: column; gap: 4px; }
+
+.failure-client-row {
+  display: grid;
+  grid-template-columns: 110px 1fr 130px auto auto;
+  gap: 10px; align-items: center;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.failure-client-row:hover { border-color: var(--border2); }
+.failure-client-row.failure-row-escalated {
+  background: rgba(245,158,11,0.06);
+  border-color: rgba(245,158,11,0.2);
+}
+
+.failure-client-what { line-height: 1.3; min-width: 0; }
+.failure-client-what > div:first-child {
+  color: var(--text);
+  overflow: hidden; text-overflow: ellipsis;
+}
+.failure-client-meta {
+  font-size: 10px; color: var(--text-3); margin-top: 2px;
+}
+.failure-client-meta .failure-source { padding: 1px 5px; font-size: 9px; }
+
+.failure-client-row .failure-status-select {
+  font-size: 11px; padding: 4px 6px; min-width: 110px;
+}
+.failure-client-row .failure-row-edit,
+.failure-client-row .failure-row-delete { width: 22px; height: 22px; font-size: 13px; }
+
+@media (max-width: 900px) {
+  .failure-client-row {
+    grid-template-columns: 1fr auto auto;
+    grid-template-areas: "station status delete" "what what what";
+    gap: 6px;
+  }
+  .failure-client-row .failure-station { grid-area: station; }
+  .failure-client-row .failure-status-select { grid-area: status; }
+  .failure-client-row .failure-row-delete { grid-area: delete; }
+  .failure-client-what { grid-area: what; }
+  .failure-client-row .failure-row-edit { display: none; }
+}

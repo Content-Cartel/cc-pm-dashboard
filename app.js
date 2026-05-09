@@ -1262,6 +1262,9 @@ function renderClientDetail(root, clientId) {
   const tasksSection = (typeof window.tasksSectionHTML === 'function')
     ? window.tasksSectionHTML(client)
     : '';
+  const failuresSection = (typeof window.failuresSectionHTML === 'function')
+    ? window.failuresSectionHTML(client)
+    : '';
 
   root.innerHTML = `
     <div class="detail-header">
@@ -1279,6 +1282,7 @@ function renderClientDetail(root, clientId) {
     ${funnelSection}
     ${calendarInlineSection}
     ${tasksSection}
+    ${failuresSection}
     ${goalsSection}
     ${settingsSection}
     ${activitySection}
@@ -1287,10 +1291,13 @@ function renderClientDetail(root, clientId) {
   // Bind collapsible toggles
   bindCollapsibles(root);
 
-  // Bind tasks + calendar inline sections (modules expose globals)
+  // Bind tasks + failures + calendar inline sections (modules expose globals)
   const rerenderDetail = () => renderClientDetail(root, clientId);
   if (typeof window.bindTasksSection === 'function') {
     window.bindTasksSection(root, client, rerenderDetail);
+  }
+  if (typeof window.bindFailuresSection === 'function') {
+    window.bindFailuresSection(root, client, rerenderDetail);
   }
   if (typeof window.bindCalendarInline === 'function') {
     window.bindCalendarInline(root, client, rerenderDetail);

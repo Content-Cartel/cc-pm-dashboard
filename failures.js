@@ -256,7 +256,7 @@
         const id = parseInt(btn.dataset.id);
         const f = getFailures().find(x => x.id === id);
         if (!f) return;
-        openEditModal(root, f);
+        openEditModal(root, f, () => renderFailureLog(root));
       });
     });
 
@@ -281,19 +281,33 @@
     });
 
     // New entry button
-    root.querySelector('#ffNewBtn').addEventListener('click', () => openNewModal(root));
+    root.querySelector('#ffNewBtn').addEventListener('click', () => openNewModal(root, () => renderFailureLog(root)));
   }
 
   // ── New / Edit modal ───────────────────────────────────────────
-  function openNewModal(root) {
-    openModal(root, null);
+  // onSave: optional callback fired after successful save. If omitted, we
+  // re-render whichever top-level view the user is currently on (failures /
+  // health / pipeline) — this lets the same modal serve both the global
+  // Failure Log and the per-client section on a client detail page.
+  function openNewModal(root, onSave) {
+    openModal(root, null, onSave);
   }
 
-  function openEditModal(root, f) {
-    openModal(root, f);
+  function openEditModal(root, f, onSave) {
+    openModal(root, f, onSave);
   }
 
-  function openModal(root, existing) {
+  function defaultOnSave() {
+    const root = document.getElementById('appRoot');
+    const hash = location.hash || '#/';
+    if (hash === '#/failures' && typeof renderFailureLog === 'function') return renderFailureLog(root);
+    if (hash === '#/health' && typeof window.renderSystemHealth === 'function') return window.renderSystemHealth(root);
+    // For client detail / pipeline, the host page is responsible for re-rendering
+    // (it passes its own onSave). Falling through here means no UI refresh, which
+    // is safer than calling renderFailureLog and clobbering the page.
+  }
+
+  function openModal(root, existing, onSave) {
     const isEdit = !!existing;
     const f = existing || {
       station: 'Onboarding',
@@ -393,7 +407,8 @@
 
       close();
       await reloadFailures();
-      renderFailureLog(document.getElementById('appRoot'));
+      if (typeof onSave === 'function') onSave();
+      else defaultOnSave();
     });
   }
 
@@ -511,9 +526,221 @@
     return `<span class="failure-badge ${escalated ? 'failure-badge-escalated' : ''}" title="${open.length} open failure${open.length === 1 ? '' : 's'}${escalated ? ' (one+ escalated)' : ''}">${open.length}</span>`;
   }
 
+  // ── Per-client section (shown on client detail page) ───────────
+  // Mirrors tasks.js: collapsible section embedded in renderClientDetail,
+  // showing only this client's open failures. Reuses the same insert/edit
+  // modal so the UX is consistent with the global Failure Log.
+  function clientFailures(clientId) {
+    return getFailures().filter(f => f.client_id === clientId);
+  }
+
+  function failureSummary(failures) {
+    const open = failures.filter(f => f.status === 'Open').length;
+    const prog = failures.filter(f => f.status === 'In-progress').length;
+    const escalated = failures.filter(f => f.status === 'Open' && isEscalated(f)).length;
+    if (failures.length === 0) return 'No failures logged';
+    const parts = [];
+    if (open) parts.push(`${open} open`);
+    if (prog) parts.push(`${prog} in progress`);
+    if (escalated) parts.push(`<span class="task-summary-overdue">${escalated} escalated</span>`);
+    return parts.length ? parts.join(' · ') : `${failures.length} resolved`;
+  }
+
+  function clientFailureRow(f) {
+    const escalated = isEscalated(f);
+    return `
+      <div class="failure-client-row ${escalated ? 'failure-row-escalated' : ''}" data-id="${f.id}">
+        <span class="failure-station failure-station-${f.station.toLowerCase()}">${f.station}</span>
+        <div class="failure-client-what">
+          <div>${escHTML(f.what_broke)}${escalated ? ' <span class="failure-escalate-flag">🚨 escalate</span>' : ''}</div>
+          <div class="failure-client-meta">${escHTML(f.owner)} · ${fmtDate(f.date_logged)} · <span class="failure-source">${escHTML(f.source)}</span></div>
+        </div>
+        <select class="failure-status-select failure-status-${f.status.toLowerCase().replace(' ', '-')}" data-id="${f.id}">
+          ${STATUSES.map(s => `<option value="${s}" ${s === f.status ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+        <button class="failure-row-edit" data-id="${f.id}" title="Edit">…</button>
+        <button class="failure-row-delete" data-id="${f.id}" title="Delete">×</button>
+      </div>`;
+  }
+
+  function failuresSectionHTML(client) {
+    if (typeof collapsibleSection !== 'function') return '';
+    const failures = clientFailures(client.id);
+    // Show open + in-progress prominently; tuck resolved/blocked behind a toggle later if it gets noisy.
+    const visible = failures.filter(f => f.status === 'Open' || f.status === 'In-progress');
+    const sorted = visible.slice().sort((a, b) => {
+      // Escalated open first, then In-progress, then Open by date desc.
+      const aEsc = isEscalated(a) ? 0 : 1;
+      const bEsc = isEscalated(b) ? 0 : 1;
+      if (aEsc !== bEsc) return aEsc - bEsc;
+      return new Date(b.date_logged) - new Date(a.date_logged);
+    });
+
+    const newBtn = `<button class="btn-primary failure-add-btn" id="failureAddBtn-${client.id}" type="button">+ Log a failure</button>`;
+    const list = sorted.length === 0
+      ? '<div class="empty-hint" style="margin-top:8px">No open failures for this client</div>'
+      : `<div class="failure-client-list" data-client-id="${client.id}">${sorted.map(clientFailureRow).join('')}</div>`;
+    const body = `<div class="failure-client-section" data-client-id="${client.id}"><div class="failure-client-actions">${newBtn}</div>${list}</div>`;
+
+    // Default-open if there's anything actionable, mirroring how Tasks behaves when active.
+    const defaultOpen = visible.length > 0;
+    return collapsibleSection('failures', 'Failures', failureSummary(visible), body, { defaultOpen });
+  }
+
+  function bindFailuresSection(root, client, rerender) {
+    const container = root.querySelector(`.failure-client-section[data-client-id="${client.id}"]`);
+    if (!container) return;
+
+    const refresh = async () => {
+      await reloadFailures();
+      rerender();
+    };
+
+    // + Log a failure → modal, prefilled with this client
+    const addBtn = container.querySelector(`#failureAddBtn-${client.id}`);
+    if (addBtn) {
+      addBtn.addEventListener('click', () => {
+        // Open the modal with client preselected by patching the fmClient default
+        // via a wrapper that overrides openModal's default form values.
+        openClientPrefilledModal(client, refresh);
+      });
+    }
+
+    // Edit row → modal (prefilled with the existing failure; preserves client)
+    container.querySelectorAll('.failure-row-edit').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = parseInt(btn.dataset.id);
+        const f = getFailures().find(x => x.id === id);
+        if (!f) return;
+        openEditModal(root, f, refresh);
+      });
+    });
+
+    // Inline status change
+    container.querySelectorAll('.failure-status-select').forEach(sel => {
+      sel.addEventListener('change', async e => {
+        const id = parseInt(e.target.dataset.id);
+        const next = e.target.value;
+        const ok = await updateFailure(id, { status: next });
+        if (ok) await refresh();
+      });
+    });
+
+    // Delete (two-click confirm)
+    container.querySelectorAll('.failure-row-delete').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = parseInt(btn.dataset.id);
+        if (btn.dataset.confirm === '1') {
+          const ok = await deleteFailure(id);
+          if (ok) await refresh();
+        } else {
+          btn.dataset.confirm = '1';
+          btn.textContent = '?';
+          setTimeout(() => {
+            if (btn.isConnected) { btn.dataset.confirm = '0'; btn.textContent = '×'; }
+          }, 2000);
+        }
+      });
+    });
+  }
+
+  // Open the new-entry modal with a specific client preselected. Hooks into
+  // openModal's existing markup by defaulting the client_id on the synthetic
+  // "existing" object — we still pass isEdit=false-ish behavior below.
+  function openClientPrefilledModal(client, onSave) {
+    const seed = {
+      station: 'Onboarding',
+      client_id: client.id,
+      what_broke: '',
+      owner: STATION_OWNER['Onboarding'],
+      status: 'Open',
+      resolution_notes: '',
+      client_confirmation_sent: false,
+      source: 'manual',
+      __isNew: true, // marker so openModal treats as new despite seeded values
+    };
+    // openModal infers isEdit from `existing` truthiness. To keep the seeded
+    // client_id while still inserting a new row, we pass a small wrapper.
+    const root = document.getElementById('appRoot');
+    openModalSeeded(root, seed, onSave);
+  }
+
+  // Variant of openModal that always inserts (never updates) but preserves seeded values.
+  function openModalSeeded(root, seed, onSave) {
+    const overlay = document.createElement('div');
+    overlay.className = 'cc-modal-overlay';
+    overlay.innerHTML = `
+      <div class="cc-modal failure-modal">
+        <div class="cc-modal-header">
+          <div class="cc-modal-title">Log a failure</div>
+          <button class="cc-modal-close" type="button">×</button>
+        </div>
+        <div class="cc-modal-body">
+          <label class="settings-label">Station
+            <select id="fmStation" class="settings-input">
+              ${STATIONS.map(s => `<option value="${s}" ${s === seed.station ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+          </label>
+          <label class="settings-label">Client
+            <select id="fmClient" class="settings-input">
+              <option value="">— none —</option>
+              ${(CLIENTS || []).map(c => `<option value="${c.id}" ${String(c.id) === String(seed.client_id) ? 'selected' : ''}>${escHTML(c.name)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="settings-label">What broke
+            <textarea id="fmWhat" class="settings-input" rows="2" placeholder="One-sentence description"></textarea>
+          </label>
+          <label class="settings-label">Owner
+            <input id="fmOwner" type="text" class="settings-input" value="${escHTML(seed.owner || '')}" placeholder="Who's responsible" />
+          </label>
+          <label class="settings-label">Source
+            <select id="fmSource" class="settings-input">
+              ${SOURCES.map(s => `<option value="${s}" ${s === seed.source ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+          </label>
+        </div>
+        <div class="cc-modal-footer">
+          <button class="btn-cancel" id="fmCancel">Cancel</button>
+          <button class="btn-primary" id="fmSave">Log failure</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    overlay.querySelector('.cc-modal-close').addEventListener('click', close);
+    overlay.querySelector('#fmCancel').addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+    overlay.querySelector('#fmStation').addEventListener('change', e => {
+      overlay.querySelector('#fmOwner').value = STATION_OWNER[e.target.value] || '';
+    });
+
+    overlay.querySelector('#fmSave').addEventListener('click', async () => {
+      const what = overlay.querySelector('#fmWhat').value.trim();
+      const owner = overlay.querySelector('#fmOwner').value.trim();
+      if (!what)  { alert('What broke is required.'); return; }
+      if (!owner) { alert('Owner is required.'); return; }
+      const payload = {
+        station: overlay.querySelector('#fmStation').value,
+        client_id: overlay.querySelector('#fmClient').value ? parseInt(overlay.querySelector('#fmClient').value) : null,
+        what_broke: what,
+        owner,
+        status: 'Open',
+        source: overlay.querySelector('#fmSource').value,
+      };
+      const ok = await insertFailure(payload);
+      if (!ok) return;
+      close();
+      await reloadFailures();
+      if (typeof onSave === 'function') onSave();
+    });
+  }
+
   // ── Expose ─────────────────────────────────────────────────────
-  window.renderFailureLog   = renderFailureLog;
-  window.renderSystemHealth = renderSystemHealth;
-  window.failureBadgeHTML   = failureBadgeHTML;
-  window.reloadFailures     = reloadFailures;
+  window.renderFailureLog    = renderFailureLog;
+  window.renderSystemHealth  = renderSystemHealth;
+  window.failureBadgeHTML    = failureBadgeHTML;
+  window.reloadFailures      = reloadFailures;
+  window.failuresSectionHTML = failuresSectionHTML;
+  window.bindFailuresSection = bindFailuresSection;
 })();
